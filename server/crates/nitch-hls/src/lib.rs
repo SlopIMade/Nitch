@@ -1,7 +1,13 @@
-//! HLS playlist handling for Nitch: parsing Twitch playlists and rewriting them for clients.
+//! HLS playlist handling for Nitch:
+//! - master playlists: parsing and rewriting for clients (this file)
+//! - [`media`]: media playlists with ad detection
+//! - [`timeline`]: the ad-free output timeline (backup segments, slates)
 //!
-//! Ad handling (M3) will live here as well; for now media playlists pass through unchanged,
-//! because segment URLs are absolute and clients load segments straight from the CDN (D16).
+//! Segment URLs stay absolute, so clients load live segments straight from the CDN (D16).
+
+pub mod media;
+pub mod time;
+pub mod timeline;
 
 use anyhow::{Result, bail};
 use url::Url;
