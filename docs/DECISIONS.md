@@ -154,3 +154,18 @@ Measured: all runtime changes work at 0.98× realtime, for ~1.85 cores per 2×2 
 - Data-paced pipeline (S3): one preroll froze the whole output.
 - Our own re-timestamping: `fallbacksrc` already does it, plus fallback and retry.
 - A full-size background: ~1.4 cores of blending for nothing.
+
+### D19 — Single-view output is a time-keyed timeline, not a 1:1 segment swap
+*2026-11-02*
+
+Recorded ad breaks have 32 ad segments where live content has 30 (each ad ends with a 0.235 s
+remainder), and some channels use 1.985 s segments, so swapping segment for segment drifts. Each
+play session therefore builds one timeline shared by all renditions:
+- entries are keyed by `PROGRAM-DATE-TIME` and get our own numbering
+- each stretch takes the primary's live segment, else the backup's, else a slate (TS or fMP4)
+- discontinuities only around slates
+
+Refines D15.
+**Rejected:**
+- 1:1 swap by sequence number or PDT: drifts after the first ad.
+- Keeping Twitch's numbering: shifts during ads.

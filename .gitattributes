@@ -11,3 +11,6 @@
 *.webp binary
 *.ico binary
 *.jar binary
+
+# Generated media assets (slate segments)
+server/crates/nitch-server/assets/* binary

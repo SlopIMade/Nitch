@@ -50,7 +50,7 @@ documented, with fixtures.
 - [x] Single view via the proxy: master rewritten, segments straight from the CDN (D16)
 - [x] Web: app shell with a persistent player (mini player while browsing), routing, Login
   (code + QR), Home, Search, Player
-- [ ] Dockerfile + compose that run on the target VM (image builds and runs on this PC; VM pending)
+- [x] Dockerfile + compose; the image builds and runs on this PC. Running it on the target VM moved to M8.
 - Later in M2/M3: lower latency (Twitch prefetch segments), WebSocket events instead of polling `/api/auth`
 
 **Needs from you:** a Twitch app registration (Client ID + secret). ✓ done
@@ -59,14 +59,25 @@ one stream served by the container on the VM.
 
 ## M3 — Ad handling v1
 
-- Ad detection module with fixture tests
-- Strategy chain: backup segment swap (keyed on PDT), then slate segments + notify. Never leave a gap (S2).
-- Slate segments: pre-encoded per rendition; check how hls.js handles the switch at the discontinuity
-- Client overlay for ad breaks
-- Log which strategy worked for each break
+- [x] Ad detection module with fixture tests (S1 recordings, sanitized with `scripts/sanitize-playlist.py`)
+- [x] Output timeline keyed on `PROGRAM-DATE-TIME` and shared by all renditions:
+  backup segments during ads, otherwise slates. Never leaves a gap (S2, D19).
+- [x] Slate segments, MPEG-TS and fMP4 (`scripts/make-slate.sh`)
+- [x] Client badge: "Ad skipped" (backup) or "Ad break · back in …" (slate), timed to the playback position
+- [x] Log which strategy filled each break
+- [x] Test switches on `POST /api/play`: `player_type`, `backup`, `simulate_ads` (in the web app via
+  `localStorage["nitch.debug.play"]`)
+
+Tested on 2026-11-02 in the browser with simulated ads on a live channel:
+- **backup:** seamless, no stall
+- **slate:** the slate plays for exactly the ad stretch, then back to live on its own
+
+Still open:
+- a *real* Twitch ad replaced live (none came up on `site` during the tests)
+- the fMP4 slate in the browser (no fMP4 channel was live)
 
 **Done when:** an ad break in single view shows either backup content or a clean overlay, and
-playback resumes on its own.
+playback resumes on its own. ✓ (with simulated ads)
 
 ## M4 — Multiview
 
@@ -120,6 +131,16 @@ move, resize and zoom the chat.
 - Diagnostics screen
 - Install guide and example compose file
 - GitHub repository + CI (build, tests, image)
+
+## M8 — Deployment on the target VM
+
+Done last, by the user's decision (2026-11-02).
+
+- Target VM hardware check: `vainfo`, CPU, cores/RAM (open from M0)
+- VA-API decode/encode in multiview (open from S3)
+- Run the image there with compose, log in, an hour-long multiview run
+
+**Done when:** Nitch runs on the VM and the TV uses it there.
 
 ## Backlog (after v1)
 

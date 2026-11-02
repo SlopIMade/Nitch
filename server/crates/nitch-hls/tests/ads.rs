@@ -141,6 +141,44 @@ fn renditions_share_numbering() {
     assert!(b.contains("cdn2.example") && !b.contains("https://cdn.example/seg"));
 }
 
+/// A regular live playlist: `count` segments of `dur` seconds from `start`.
+fn live_playlist(start: i64, count: i64, dur: f64, first_seq: i64) -> String {
+    let mut text = format!("#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:{first_seq}\n");
+    for i in 0..count {
+        let t = start + (i as f64 * dur * 1000.0).round() as i64;
+        text += &format!("#EXT-X-PROGRAM-DATE-TIME:{}\n#EXTINF:{dur:.3},live\nhttps://cdn.example/{t}.ts\n", format_pdt(t));
+    }
+    text
+}
+
+#[test]
+fn every_ad_segment_becomes_exactly_one_slate() {
+    // Simulated ads on a clean 2 s grid: 15 of 60 segments are ads; refresh one segment at a time.
+    for dur in [2.0, 1.985] {
+        let start = parse_pdt("2026-11-02T22:55:00.000Z").unwrap();
+        let mut tl = Timeline::new();
+        let mut slates = std::collections::BTreeSet::new();
+        let mut lives = std::collections::BTreeSet::new();
+        for step in 0..60 {
+            let first = (step - 13).max(0);
+            let mut pl = parse(&live_playlist(start + (first as f64 * dur * 1000.0).round() as i64, step - first + 1, dur, first));
+            for s in &mut pl.segments {
+                s.ad = (30..45).contains(&(s.seq as i64));
+            }
+            tl.update(0, &pl, None);
+            let out = tl.render(0, &SLATES);
+            let mut seq = header(&out, "#EXT-X-MEDIA-SEQUENCE:");
+            for line in out.lines().filter(|l| l.starts_with("#EXTINF")) {
+                if line.ends_with(",slate") { slates.insert(seq) } else { lives.insert(seq) };
+                seq += 1;
+            }
+        }
+        assert_eq!(slates.len(), 15, "one slate per ad segment ({dur} s segments)");
+        let all: Vec<u64> = slates.union(&lives).copied().collect();
+        assert!(all.windows(2).all(|w| w[1] == w[0] + 1), "no hole in the numbering ({dur} s)");
+    }
+}
+
 #[test]
 fn simulated_ads_mark_live_segments() {
     let mut pl = parse(EMBED[0]);

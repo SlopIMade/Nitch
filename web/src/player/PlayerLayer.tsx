@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Hls, { type Level } from "hls.js";
-import { api, ApiError } from "../api";
+import { api, ApiError, type PlayStatus } from "../api";
 import { usePlayer } from "./PlayerContext";
 
 type Quality = { index: number; label: string };
@@ -12,6 +12,28 @@ type Quality = { index: number; label: string };
 function levelLabel(l: Level): string {
   const fps = l.frameRate && l.frameRate > 30 ? Math.round(l.frameRate) : "";
   return l.height ? `${l.height}p${fps}` : "audio";
+}
+
+/** Shows that an ad is being skipped; for slates, how long until the stream is back. */
+function AdBadge({ ad, hls }: { ad: PlayStatus["ad"]; hls: Hls | null }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!ad) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [ad]);
+  if (!ad) return null;
+  // The server reports stream time; the player's position in stream time is its program date
+  // time. It runs behind the live edge, so only show the badge while it plays the ad's stretch.
+  const playing = hls?.playingDate?.getTime();
+  if (playing && (playing < ad.from || (ad.until && playing >= ad.until))) return null;
+  if (ad.filled_by === "backup") return <div className="ad-badge">Ad skipped</div>;
+  const left = ad.until && playing ? Math.max(0, Math.round((ad.until - playing) / 1000)) : null;
+  return (
+    <div className="ad-badge ad-badge--slate">
+      Ad break{left !== null && left > 0 ? ` · back in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : ""}
+    </div>
+  );
 }
 
 export function PlayerLayer() {
@@ -23,12 +45,19 @@ export function PlayerLayer() {
   const [qualities, setQualities] = useState<Quality[]>([]);
   const [quality, setQuality] = useState(-1); // -1 = auto
   const [muted, setMuted] = useState(false);
+  const [playId, setPlayId] = useState<string | null>(null);
 
   const info = useQuery({
     queryKey: ["channel", channel],
     queryFn: () => api.channel(channel!),
     enabled: !!channel,
     refetchInterval: 60_000,
+  });
+  const status = useQuery({
+    queryKey: ["play-status", playId],
+    queryFn: () => api.playStatus(playId!),
+    enabled: !!playId,
+    refetchInterval: 2000,
   });
 
   useEffect(() => {
@@ -39,11 +68,13 @@ export function PlayerLayer() {
     setLoading(true);
     setQualities([]);
     setQuality(-1);
+    setPlayId(null);
 
     api
       .play(channel)
-      .then(({ hls_url }) => {
+      .then(({ id, hls_url }) => {
         if (cancelled) return;
+        setPlayId(id);
         const start = () => video.play().catch(() => {
           // Autoplay with sound can be blocked; start muted instead.
           video.muted = true;
@@ -114,6 +145,7 @@ export function PlayerLayer() {
       <video ref={videoRef} className="player__video" playsInline />
       {loading && <div className="player__status">Loading…</div>}
       {error && <div className="player__status player__status--error">{error}</div>}
+      <AdBadge ad={status.data?.ad ?? null} hls={hlsRef.current} />
       {mode === "full" ? (
         <>
           <div className="player__bar player__bar--top">

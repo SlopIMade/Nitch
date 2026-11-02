@@ -262,6 +262,26 @@ which got the fewest video ads in S1.
 *(gap − buffer)* seconds, after which the player sits at the live edge with a tiny buffer and stutters.
 The output timeline therefore always stays continuous.
 
+**How it's built (M3, `nitch-hls::timeline`):** a 1:1 segment swap doesn't work, because ads have
+other segment lengths than live content:
+- 2 × 30.235 s = 32 ad segments instead of 30 live ones
+- some channels use 1.985 s live segments
+
+So each play session keeps **one timeline shared by all renditions**:
+- **Entries are keyed by `PROGRAM-DATE-TIME`.** It is identical across renditions and between
+  `site` and `embed` (S2).
+- **Each stretch of time gets exactly one entry:**
+  1. the primary's live segment
+  2. else the backup's live segment at the same time
+  3. else a slate of the usual segment length, once no live segment can still come: either live
+     content resumes later, or the primary has moved ≥ 4 s past it
+- **Our own numbering, the same in every rendition,** keeps quality switches aligned.
+- **Discontinuities only around slates.** Primary and backup are the same transcode.
+- **fMP4 streams get an fMP4 slate with its own `EXT-X-MAP`,** because a map applies to all
+  following segments.
+- **Ad status for the client:** `GET /api/play/{id}` reports the break's `from`/`until` in stream
+  time and whether it is filled by `backup` or `slate`.
+
 Playback tokens are always requested **anonymously**, never with the user's account.
 
 ## Twitch integration (`nitch-twitch`)
@@ -296,7 +316,8 @@ REST + JSON under `/api`:
 | GET | `/api/follows/live` | Followed channels that are live |
 | GET | `/api/search?q=` | Channel search |
 | GET | `/api/channels/{login}` | Channel and live info |
-| POST | `/api/play` | Single view → `{hls_url}` |
+| POST | `/api/play` | Single view → `{id, hls_url}`; testing options `player_type`, `backup`, `simulate_ads` |
+| GET | `/api/play/{id}` | Ad status of a play session: `{ad: {from, until, filled_by}}` or `{ad: null}` |
 | GET | `/api/sessions` | All saved multiview sessions |
 | POST | `/api/sessions` | Create `{name, tiles[]}` (tile: `{channel, x, y, w, h, z, fit}` in grid cells) |
 | GET | `/api/sessions/{id}` | One session |

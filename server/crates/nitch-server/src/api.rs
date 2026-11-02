@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::auth::{Auth, AuthStatus};
-use crate::play::Player;
+use crate::play::{PlayOptions, PlayStatus, Player};
 
 pub struct AppState {
     pub auth: Arc<Auth>,
@@ -32,6 +32,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/search", get(search))
         .route("/api/channels/{login}", get(channel))
         .route("/api/play", post(play))
+        .route("/api/play/{id}", get(play_status))
+        .route("/hls/slate.ts", get(|| slate("video/mp2t", include_bytes!("../assets/slate.ts"))))
+        .route("/hls/slate-init.mp4", get(|| slate("video/mp4", include_bytes!("../assets/slate-init.mp4"))))
+        .route("/hls/slate.m4s", get(|| slate("video/iso.segment", include_bytes!("../assets/slate.m4s"))))
         .route("/hls/{id}/master.m3u8", get(hls_master))
         .route("/hls/{id}/{file}", get(hls_media))
         .with_state(state)
@@ -203,15 +207,40 @@ async fn channel(State(s): St, Path(login): Path<String>) -> ApiResult<ChannelIn
 #[derive(Deserialize)]
 struct PlayRequest {
     channel: String,
+    /// Testing ad handling: primary player type (default `site`).
+    player_type: Option<String>,
+    /// Testing: `false` disables the backup source, so ads become slates.
+    backup: Option<bool>,
+    /// Testing: treat 30 s of every 2 minutes as an ad.
+    simulate_ads: Option<bool>,
 }
+
+const PLAYER_TYPES: &[&str] = &["site", "embed", "popout", "autoplay", "picture-by-picture", "frontpage"];
 
 async fn play(State(s): St, Json(req): Json<PlayRequest>) -> ApiResult<serde_json::Value> {
     let channel = req.channel.trim();
     if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(ApiError::BadRequest("invalid channel name".into()));
     }
-    let id = s.player.start(channel).await?;
+    let mut options = PlayOptions::default();
+    if let Some(pt) = req.player_type {
+        if !PLAYER_TYPES.contains(&pt.as_str()) {
+            return Err(ApiError::BadRequest(format!("unknown player type '{pt}'")));
+        }
+        options.player_type = pt;
+    }
+    options.backup = req.backup.unwrap_or(true);
+    options.simulate_ads = req.simulate_ads.unwrap_or(false);
+    let id = s.player.start(channel, options).await?;
     Ok(Json(json!({ "id": id, "hls_url": format!("/hls/{id}/master.m3u8") })))
+}
+
+async fn play_status(State(s): St, Path(id): Path<String>) -> ApiResult<PlayStatus> {
+    s.player.status(&id).map(Json).ok_or_else(|| ApiError::NotFound("unknown play session".into()))
+}
+
+async fn slate(content_type: &'static str, bytes: &'static [u8]) -> Response {
+    ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "public, max-age=86400")], bytes).into_response()
 }
 
 fn m3u8(body: String) -> Response {

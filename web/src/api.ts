@@ -38,6 +38,21 @@ export type ChannelInfo = {
   live: LiveStream | null;
 };
 
+export type PlayStatus = {
+  channel: string;
+  /** Set while an ad break is in the playlist; `from`/`until` are stream time (Unix ms). */
+  ad: { from: number; until: number | null; filled_by: "backup" | "slate" } | null;
+};
+
+/** Testing ad handling: `localStorage["nitch.debug.play"] = '{"simulate_ads":true,"backup":false}'`. */
+function debugPlayOptions(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem("nitch.debug.play") ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -71,7 +86,11 @@ export const api = {
   search: (q: string) => request<SearchResult[]>(`/api/search?q=${encodeURIComponent(q)}`),
   channel: (login: string) => request<ChannelInfo>(`/api/channels/${encodeURIComponent(login)}`),
   play: (channel: string) =>
-    request<{ id: string; hls_url: string }>("/api/play", { method: "POST", body: JSON.stringify({ channel }) }),
+    request<{ id: string; hls_url: string }>("/api/play", {
+      method: "POST",
+      body: JSON.stringify({ ...debugPlayOptions(), channel }),
+    }),
+  playStatus: (id: string) => request<PlayStatus>(`/api/play/${encodeURIComponent(id)}`),
 };
 
 export function formatViewers(n: number): string {

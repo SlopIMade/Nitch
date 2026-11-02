@@ -131,8 +131,9 @@ impl Timeline {
         loop {
             let next = live.range(end - TOLERANCE_MS..).next();
             match next {
-                // The next live segment starts here (or within one segment): take it.
-                Some((&pdt, c)) if pdt - end < ms(self.nominal) + TOLERANCE_MS => {
+                // The next live segment starts here (within half a segment, which absorbs
+                // rounding and drift like 1.985 s segments): take it.
+                Some((&pdt, c)) if pdt - end < ms(self.nominal) / 2 => {
                     self.push(pdt, c.duration, c.origin, c.genuine_disc);
                     end = pdt + ms(c.duration);
                 }

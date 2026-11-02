@@ -406,6 +406,29 @@ h2 {
   text-overflow: ellipsis;
 }
 
+.ad-badge {
+  position: absolute;
+  top: 70px;
+  right: 18px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.65);
+  color: var(--muted);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+
+.ad-badge--slate {
+  color: var(--text);
+  background: rgba(145, 71, 255, 0.85);
+}
+
+.player--mini .ad-badge {
+  top: 8px;
+  right: 8px;
+  font-size: 0.8rem;
+}
+
 .player__mini-bar {
   position: absolute;
   left: 0;

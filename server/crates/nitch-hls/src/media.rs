@@ -79,6 +79,22 @@ impl MediaPlaylist {
         self.ad_ranges().into_iter().map(|(_, end)| end).max()
     }
 
+    /// The ad break in this playlist in stream time: `(from, until)`. `until` is `None` while the
+    /// ad still runs at the live edge without an announced end (e.g. simulated ads).
+    pub fn ad_window(&self) -> Option<(i64, Option<i64>)> {
+        let ranges = self.ad_ranges();
+        let ads: Vec<&Segment> = self.segments.iter().filter(|s| s.ad).collect();
+        let from = ranges.iter().map(|r| r.0).chain(ads.iter().filter_map(|s| s.pdt)).min()?;
+        let announced = ranges.iter().map(|r| r.1).max();
+        let ongoing = self.segments.last().is_some_and(|s| s.ad);
+        let seen_end = (!ongoing).then(|| ads.iter().filter_map(|s| s.end()).max()).flatten();
+        let until = match (announced, seen_end) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        Some((from, until))
+    }
+
     /// End time of the newest segment.
     pub fn edge(&self) -> Option<i64> {
         self.segments.last()?.end()
