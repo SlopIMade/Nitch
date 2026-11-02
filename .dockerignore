@@ -1,0 +1,9 @@
+**/target
+**/node_modules
+web/dist
+**/*.tsbuildinfo
+data
+spikes
+.git
+.env
+.env.*

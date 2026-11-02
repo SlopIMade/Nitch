@@ -129,8 +129,11 @@ impl Auth {
                 return;
             }
             match self.tw.poll_device_login(&code, SCOPES).await {
-                Ok(Poll::Pending) => {}
-                Ok(Poll::SlowDown) => interval += 5,
+                Ok(Poll::Pending) => tracing::debug!("device login: still waiting for confirmation"),
+                Ok(Poll::SlowDown) => {
+                    tracing::debug!("device login: slow down");
+                    interval += 5
+                }
                 Ok(Poll::Done(token)) => {
                     match self.finish_login(token).await {
                         Ok(user) => tracing::info!(user = %user.login, "logged in"),

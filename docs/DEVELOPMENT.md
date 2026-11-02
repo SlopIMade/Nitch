@@ -70,9 +70,30 @@ x86_64 image).
 
 ## 4. Running on this PC
 
-- **Development:** `cargo run` in WSL; the Vite dev server runs on Windows and proxies `/api` and
-  `/hls` to the server. WSL2 forwards its ports to Windows `localhost`, so this works in both directions.
-- **Container test:** `docker compose up` in WSL, the same image as production.
+Credentials first: copy `.env.example` to `.env` and fill in the Twitch app's Client ID and secret.
+
+- **Server** (WSL, from the repository root, so `.env` and `web/dist` are found):
+
+  ```bash
+  cd <repo> && cargo run --manifest-path server/Cargo.toml -p nitch-server
+  ```
+
+  It listens on `http://localhost:8080` and serves the built web app from `web/dist`. The login and
+  other data go to `data/nitch.db`.
+- **Web app** (Windows, in `web/`):
+  - `npm run build` builds the app that the server serves.
+  - `npm run dev` starts a Vite dev server on `http://localhost:5173` with hot reload; it proxies
+    `/api` and `/hls` to the server.
+
+  WSL2 forwards its ports to Windows `localhost`, so both directions work.
+- **Container** (WSL, the same image as production):
+
+  ```bash
+  cd <repo> && docker compose -f deploy/compose.yaml up -d --build
+  ```
+
+  The container keeps its own login in the `nitch-data` volume. `NITCH_BIND=0.0.0.0:8090` in front
+  of the command runs it next to a dev server that's already on 8080.
 - **Android TV emulator:** reaches the server at `10.0.2.2:<port>`. mDNS doesn't pass through the
   emulator's NAT, so use manual entry there.
 - **Encoding on this PC:** software x264 only. WSL exposes the GPU as `/dev/dxg` but has no

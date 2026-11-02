@@ -11,7 +11,7 @@ sudo apt-get install -y \
   gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
   vainfo mesa-va-drivers \
-  docker.io docker-compose-v2
+  docker.io docker-compose-v2 docker-buildx
 
 sudo usermod -aG docker "$USER"
 

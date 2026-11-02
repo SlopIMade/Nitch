@@ -1,0 +1,25 @@
+# Run from the repository root:
+#   docker compose -f deploy/compose.yaml up -d --build
+# Credentials come from ../.env (see .env.example).
+
+services:
+  nitch:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: nitch:latest
+    # Host networking: reachable on the LAN without port mapping, and needed for mDNS
+    # discovery by the TV app later (M5).
+    network_mode: host
+    env_file: ../.env
+    environment:
+      NITCH_BIND: ${NITCH_BIND:-0.0.0.0:8080}
+    volumes:
+      - nitch-data:/data
+    restart: unless-stopped
+    # Hardware video encoding (M4), once the target VM exposes VA-API:
+    # devices:
+    #   - /dev/dri:/dev/dri
+
+volumes:
+  nitch-data:

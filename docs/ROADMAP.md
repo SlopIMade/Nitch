@@ -43,16 +43,17 @@ documented, with fixtures.
 
 ## M2 — Server core & desktop basics
 
-- Cargo workspace (crates as in [ARCHITECTURE.md](ARCHITECTURE.md#server-server-rust)), env config,
+- [x] Cargo workspace (crates as in [ARCHITECTURE.md](ARCHITECTURE.md#server-server-rust)), env config,
   `tracing` logs, SQLite store
-- Device code login, token refresh, logout
-- Helix: followed live streams, search, channel info
-- Single view via the proxy (S2, brought to production quality)
-- Web: app shell with a persistent player (menus and settings open over it), routing, Login
+- [x] Device code login, token refresh, logout. Tested end to end with a real account on 2026-11-02.
+- [x] Helix: followed live streams, search, channel info
+- [x] Single view via the proxy: master rewritten, segments straight from the CDN (D16)
+- [x] Web: app shell with a persistent player (mini player while browsing), routing, Login
   (code + QR), Home, Search, Player
-- Dockerfile + compose that run on the target VM
+- [ ] Dockerfile + compose that run on the target VM (image builds and runs on this PC; VM pending)
+- Later in M2/M3: lower latency (Twitch prefetch segments), WebSocket events instead of polling `/api/auth`
 
-**Needs from you:** a Twitch app registration (Client ID + secret).
+**Needs from you:** a Twitch app registration (Client ID + secret). ✓ done
 **Done when:** on desktop you can log in via phone, see followed live channels, search, and watch
 one stream served by the container on the VM.
 

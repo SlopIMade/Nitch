@@ -54,7 +54,11 @@ export function LoginPage() {
         <h1>Log in with Twitch</h1>
         {pending ? (
           <>
-            <p className="muted">Scan the code with your phone, or open the link on any device.</p>
+            <p className="muted">
+              Scan the code with your phone, or open the link on any device.
+              <br />
+              Log in, then press <strong>Authorize</strong> and wait for "Success".
+            </p>
             <div className="login__qr">
               <QRCodeSVG value={pending.verification_uri} size={220} marginSize={2} />
             </div>
