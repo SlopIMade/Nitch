@@ -142,6 +142,11 @@ output:
 - **Add, replace or remove a tile:** link or unlink a tile bin through dynamic pads while running.
 - **Stalls** (ad break without backup, streamer offline, network trouble): `fallbackswitch` shows that
   tile's slate. The other tiles are not affected.
+- **Clock-paced, not data-paced:** S3 showed that without this, one stalled input (e.g. a preroll)
+  holds up the whole output. Therefore:
+  - every tile is re-timestamped onto the pipeline clock when it starts or restarts
+  - the output (compositor, encoder, audio) runs on the clock and never waits for any single tile
+  - inputs start near the live edge instead of replaying the playlist backlog
 - **Audio:** every tile has its own audio rendition. The client switches audio tracks in hls.js
   instantly, with no server round trip and no pipeline delay.
 - **Layouts as data:** a list of rectangles in normalized coordinates, plus z-order.
@@ -154,7 +159,9 @@ output:
 - **Overlays in sync:** the client draws focus frames and tile labels from the same layout data.
   A marker in the playlist (`EXT-X-DATERANGE`) tells it where in the video a new layout begins, so
   the overlays switch together with the picture.
-- **Defaults:** output 1920×1080 at 30 fps, H.264, configurable.
+- **Defaults:** output 1920×1080 at 30 fps, H.264, configurable. Tiles take the rendition just above
+  their size (480p for 2×2). Measured in S3: about 1.75 cores of a Ryzen 9 3900X with x264 veryfast; 60 fps output
+  nearly doubles that, and 720p inputs add ~60 %.
 - **Limits:** a configurable maximum number of concurrent sessions. A session is torn down when no
   client has fetched it for N seconds.
 

@@ -24,8 +24,14 @@ features are built on top of them.
   the CDN allows CORS; just dropping ads freezes the picture, so gaps must be filled.
 - **S3 Composite:** GStreamer 2×2 from 4 live channels → HLS with software encoding, measuring CPU.
   Then the same with VA-API on the target VM.
+  - [x] Software part → [findings](../spikes/s3-composite/FINDINGS.md): ~1.75 cores (3900X) for 4×480p
+    → 1080p30. One stalled input (e.g. a preroll) can hold up the whole output.
+  - [ ] VA-API on the target VM (needs the VM check from M0)
 - **S4 Dynamic changes:** while S3 runs, move and resize tiles, replace one input and kill one input
-  (its slate must appear), all without the output stopping.
+  (its slate must appear), all without the output stopping. From S3:
+  - pace every tile and the output by the clock (`fallbacksrc` / `livesync`)
+  - give the output audio its own fallback
+  - start inputs near the live edge
 
 **Done when:** we know the CPU/GPU cost of one multiview session and the ad-break behaviour is
 documented, with fixtures.
