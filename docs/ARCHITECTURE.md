@@ -3,11 +3,16 @@
 ## Goals (v1)
 
 - Watch Twitch in a desktop browser and on Android TV (fully usable with a TV remote).
-- **Multiview:** several live streams merged by the server into one video.
+- **Multiview:** several live streams merged by the server into one video; tiles can be moved and
+  resized freely.
 - **Ad breaks** are detected and handled by the server.
 - **One shared Twitch login** held by the server; on the TV you log in with your phone.
 - Home screen with followed live channels, channel search.
-- Read-only chat for the focused stream.
+- **Chat overlay** (read-only):
+  - modes: off, focused stream, or one combined chat from several streams
+  - floats over the video
+  - adjustable size, position and font size
+  - can be changed while the streams keep playing
 - Runs as a Docker container on Linux, inside the home network.
 
 Not in v1 (see [Roadmap → Backlog](ROADMAP.md#backlog-after-v1)): profiles per person, sending chat,
@@ -70,15 +75,18 @@ as Rust crates and registered statically, so the Docker image only needs stock G
 There is one UI for desktop and TV. Inside the TV shell it switches to a "10-foot" mode: larger type,
 visible focus rings, no hover-only controls. Everything you can click is also focusable.
 
+The **player is mounted at the app root** and stays mounted when you navigate. Menus, search and
+settings open as layers on top of it, so changing a setting never stops the streams.
+
 | Screen | Content |
 |---|---|
 | Connect | TV only, when no server is known: discovered servers + manual address. |
 | Login | Device code + QR code ("open twitch.tv/activate on your phone"). |
 | Home | Followed channels that are live: thumbnail, title, category, viewers. |
 | Search | Channel search, live channels first. TV uses the system on-screen keyboard. |
-| Player | Single stream, quality, ad-break overlay, chat panel. |
-| Multiview | Layout picker, fill tiles from follows/search; focused tile gets audio + chat. |
-| Settings | Default quality, ad strategy order, output resolution, encoder info, logout. |
+| Player | Single stream, quality, ad-break overlay, chat overlay. |
+| Multiview | Start from a preset or edit freely (move and resize tiles); fill tiles from follows/search; the focused tile gets audio. |
+| Settings | Opens over the running player and changes apply live. Covers chat (mode, channels, opacity, font size), default quality, ad strategy order, output resolution, encoder info and logout. |
 
 ### Android TV shell (`android-tv/`)
 
@@ -134,8 +142,16 @@ output:
   tile's slate. The other tiles are not affected.
 - **Audio:** every tile has its own audio rendition. The client switches audio tracks in hls.js
   instantly, with no server round trip and no pipeline delay.
-- **Layouts as data:** a list of rectangles in normalized coordinates. v1 ships 1+1 side by side,
-  2×2, 1 big + 2 small, and 1 big + 3 small; custom layouts come later.
+- **Layouts as data:** a list of rectangles in normalized coordinates, plus z-order.
+  - Presets are starting points: 1+1 side by side, 2×2, 1 big + 2 small, 1 big + 3 small.
+  - Tiles can be moved and resized freely, with optional grid snapping.
+  - The result can be saved as your own preset.
+- **Editing feedback:** the video reaches the client a few seconds after the server composites it.
+  While you drag or resize, the editor draws outlines over the video immediately. The server applies
+  the new layout when you let go, and the video catches up a few seconds later.
+- **Overlays in sync:** the client draws focus frames and tile labels from the same layout data.
+  A marker in the playlist (`EXT-X-DATERANGE`) tells it where in the video a new layout begins, so
+  the overlays switch together with the picture.
 - **Defaults:** output 1920×1080 at 30 fps, H.264, configurable.
 - **Limits:** a configurable maximum number of concurrent sessions. A session is torn down when no
   client has fetched it for N seconds.
@@ -146,6 +162,29 @@ is shown in diagnostics.
 
 **Latency:** Twitch's own latency, plus roughly 3–6 s for multiview (segment length × buffered
 segments). LL-HLS or WebRTC (`webrtcsink`) can bring this down later.
+
+## Chat overlay (client)
+
+The client draws the chat as HTML on top of the video; it is not baked into the video. That keeps it
+sharp at any zoom, lets it change instantly, and costs the server nothing.
+
+- **Modes:** off, focused stream, or combined.
+  - Combined is **one merged window**: messages from the selected streams in arrival order, each line
+    tagged with its channel (color stripe + name).
+  - In multiview you pick which streams are included; the default is all tiles.
+  - In single view, focused and combined are the same.
+- **Look:** floats over the video with a slightly transparent background; the opacity is adjustable.
+- **Geometry:** position and size are a rectangle relative to the video area, so it scales with the
+  screen. Font size (zoom) is set separately from the window size.
+- **Editing:**
+  - Desktop: drag to move, drag the edges to resize, Ctrl + mouse wheel for font size.
+  - TV: an "Adjust chat" mode from the player menu. The D-pad moves the chat, OK switches between
+    move and resize, a small toolbar sets the font size, and Back finishes.
+- **Live changes:** mode, channels, geometry and font size change without touching the stream, either
+  from the player's quick menu or from settings (which open over the player).
+- **Saved per device** in localStorage, because a TV and a desktop monitor need different sizes.
+- **Light on TV hardware:** only the last ~150 messages stay in the DOM, and message bursts are batched
+  into one update per animation frame.
 
 ## Ad handling (`nitch-hls`)
 
@@ -191,7 +230,7 @@ Playback tokens are always requested **anonymously**, never with the user's acco
 - **GQL (unofficial, the same thing the browser player and streamlink use):** the playback access token
   and the usher master playlist. This is isolated in its own module because it can break without notice.
 - **Chat (read-only):** anonymous IRC over WebSocket (`irc-ws.chat.twitch.tv`). One connection that
-  joins and leaves channels as focus changes and parses tags (emotes, badges, colors); messages are fanned
+  joins and leaves channels as the shown chats change (focused stream or combined set) and parses tags (emotes, badges, colors); messages are fanned
   out over our WebSocket. It sits behind a trait so EventSub can replace it.
 
 ## Server API (sketch)
@@ -216,14 +255,19 @@ REST + JSON under `/api`:
 WebSocket at `/api/ws`:
 
 - **Server → client:** `auth_changed`, `ad_break`, `ad_break_end`, `tile_state` (loading / live / offline), `chat_message`.
-- **Client → server:** `chat_subscribe {channel}`.
+- **Client → server:** `chat_subscribe {channels[]}`. Every `chat_message` carries its channel, which
+  is what the combined chat needs.
 
 Playlists and segments are served under `/hls/...`.
 
 ## Storage
 
-A SQLite file in the `/data` volume holds tokens, settings and saved multiview presets. The Twitch
-client secret comes from the environment, not from the database.
+A SQLite file in the `/data` volume holds tokens, server settings and saved multiview presets
+(including your own layouts). The Twitch client secret comes from the environment, not from the
+database.
+
+Per-device UI settings (chat mode, chat geometry, font size, opacity) live in the client's
+localStorage.
 
 ## Deployment
 

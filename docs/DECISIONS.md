@@ -79,3 +79,30 @@ Dev (WSL) and the production image use the same release, so GStreamer versions m
 gstreamer-rs 0.25 and gst-plugins-rs 0.15 (`fallbackswitch`, `fallbacksrc`, `hlssink3`, `hlscmafsink`)
 build, register statically and run against GStreamer 1.24.2.
 **Revisit** if we hit a bug that is only fixed in a newer GStreamer.
+
+### D12 — Chat is a client-side overlay: off, focused or combined
+*2026-11-02*
+
+The chat is drawn as HTML over the video, so it stays sharp, changes instantly and costs the server
+nothing. Combined mode is **one merged window**, with each line tagged by its channel; you choose which
+streams are included. It floats over the video with a slightly transparent background, and size,
+position and font size are adjustable. Settings are saved per device, because TV and desktop screens
+differ. Extends D6.
+**Rejected:**
+- Burning chat into the server's video: blurry, delayed, and the same for every device.
+- One chat window per stream: chosen against for v1.
+
+### D13 — Free tile layouts in v1
+*2026-11-02*
+
+Tiles can be moved and resized freely; presets are only starting points. A layout is a list of normalized
+rectangles, applied live by the compositor. The video reaches the client a few seconds after the
+server composites it, so the editor previews changes with outlines, and markers in the playlist
+keep client overlays (focus frame, labels) in sync with the picture.
+**Rejected:** presets only, with free resizing after v1.
+
+### D14 — Persistent player; settings open over it
+*2026-11-02*
+
+The player is mounted at the app root and never unmounts on navigation. Settings, search and menus are
+layers on top of it, so changing a setting never stops a stream.

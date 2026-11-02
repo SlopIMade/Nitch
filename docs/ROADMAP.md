@@ -32,7 +32,8 @@ documented, with fixtures.
 - Device code login, token refresh, logout
 - Helix: followed live streams, search, channel info
 - Single view via the proxy (S2, brought to production quality)
-- Web: app shell, routing, Login (code + QR), Home, Search, Player
+- Web: app shell with a persistent player (menus and settings open over it), routing, Login
+  (code + QR), Home, Search, Player
 - Dockerfile + compose that run on the target VM
 
 **Needs from you:** a Twitch app registration (Client ID + secret).
@@ -57,10 +58,19 @@ playback resumes on its own.
 - Per-tile audio renditions + master playlist; audio switching on the client
 - Encoder/decoder probing (VA-API → software), diagnostics endpoint
 - Session limits, idle teardown
-- Web: multiview builder, tile focus (audio, later chat), swap/remove tiles
+- Web: multiview builder, tile focus (audio), swap/remove tiles
+- Layout editor:
+  - presets as a starting point
+  - free move/resize of tiles with mouse and with the TV remote
+  - outline preview while editing
+  - save as your own preset
+- Layout-change markers in the playlist, so client overlays switch in sync with the video
 
-**Done when:** 2×2 runs stable for an hour on the target; layout and tile changes don't interrupt
-the output; audio switching is instant.
+**Done when:**
+- 2×2 runs stable for an hour on the target
+- layout and tile changes don't interrupt the output
+- audio switching is instant
+- tiles can be moved and resized on desktop and with the TV remote
 
 ## M5 — Android TV
 
@@ -73,12 +83,17 @@ the output; audio switching is instant.
 **Needs from you:** which Android TV device(s) you use.
 **Done when:** the whole app is usable with nothing but the TV remote.
 
-## M6 — Chat (read-only)
+## M6 — Chat overlay (read-only)
 
 - Anonymous IRC reader on the server, fanned out over the WebSocket
-- Chat panel (desktop: side panel, TV: overlay) for the focused stream, with Twitch emotes and badges
+- Overlay over the video with a slightly transparent background (opacity adjustable), Twitch emotes
+  and badges
+- Modes: off, focused stream, or combined (one merged window, lines tagged by channel, channels selectable)
+- Move, resize and font size (zoom), with the mouse and with the TV remote; saved per device
+- All chat changes apply live, from the player's quick menu or from settings, without interrupting playback
 
-**Done when:** chat follows focus in both single view and multiview.
+**Done when:** while a multiview keeps playing, you can switch between off, focused and combined, and
+move, resize and zoom the chat.
 
 ## M7 — Polish & operations
 
