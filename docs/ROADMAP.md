@@ -64,25 +64,26 @@ playback resumes on its own.
 
 ## M4 — Multiview
 
-- Session API (create / update / delete), layouts as data
-- Pipeline manager: one actor per session; add / replace / remove tiles and change layouts at runtime;
-  a slate per tile
+- Sessions stored on the server (SQLite), unlimited: CRUD API, tiles in 60×60 grid cells
+- Pipeline manager: one actor per **running** session, shared by every device that opens it;
+  add / replace / remove tiles and change layouts at runtime; a slate per tile
+- `session_updated` events so all devices watching a session follow edits
 - Per-tile audio renditions + master playlist; audio switching on the client
 - Encoder/decoder probing (VA-API → software), diagnostics endpoint
-- Session limits, idle teardown
-- Web: multiview builder, tile focus (audio), swap/remove tiles
-- Layout editor:
-  - presets as a starting point
-  - free move/resize of tiles with mouse and with the TV remote
+- Limit on running sessions, idle teardown (the saved session stays)
+- Web: session list (create from template, rename, duplicate, delete), tile focus (audio), swap/remove tiles
+- Grid editor:
+  - templates as a starting point
+  - add streams and place/resize them on the grid with mouse and with the TV remote (snap to cells)
   - outline preview while editing
-  - save as your own preset
 - Layout-change markers in the playlist, so client overlays switch in sync with the video
 
 **Done when:**
 - 2×2 runs stable for an hour on the target
 - layout and tile changes don't interrupt the output
 - audio switching is instant
-- tiles can be moved and resized on desktop and with the TV remote
+- tiles can be placed and resized on desktop and with the TV remote
+- a session edited on the desktop opens on the TV with the identical layout
 
 ## M5 — Android TV
 
@@ -122,7 +123,6 @@ move, resize and zoom the chat.
 - Go-live notifications (EventSub)
 - VODs and clips
 - Lower-latency output (LL-HLS, or WebRTC via `webrtcsink`)
-- Sharing one multiview session across devices
 - Ad-free playback for Turbo / subscribed accounts
 - Native ExoPlayer surface on the TV, if WebView playback is too slow
 - Remote access (e.g. via Tailscale)

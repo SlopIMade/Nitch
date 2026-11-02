@@ -3,8 +3,10 @@
 ## Goals (v1)
 
 - Watch Twitch in a desktop browser and on Android TV (fully usable with a TV remote).
-- **Multiview:** several live streams merged by the server into one video; tiles can be moved and
-  resized freely.
+- **Multiview:** several live streams merged by the server into one video.
+  - Tiles are placed on a fixed **60×60 grid**.
+  - Multiview **sessions are saved on the server**, as many as you like.
+  - Every device sees the same sessions with the identical layout.
 - **Ad breaks** are detected and handled by the server.
 - **One shared Twitch login** held by the server; on the TV you log in with your phone.
 - Home screen with followed live channels, channel search.
@@ -85,7 +87,8 @@ settings open as layers on top of it, so changing a setting never stops the stre
 | Home | Followed channels that are live: thumbnail, title, category, viewers. |
 | Search | Channel search, live channels first. TV uses the system on-screen keyboard. |
 | Player | Single stream, quality, ad-break overlay, chat overlay. |
-| Multiview | Start from a preset or edit freely (move and resize tiles); fill tiles from follows/search; the focused tile gets audio. |
+| Sessions | Your saved multiview sessions (any number, same list on every device): open, create (from a template), rename, duplicate, delete. |
+| Multiview | Plays a session. The editor adds streams from follows/search and places them on the 60×60 grid (move, resize, snap); the focused tile gets audio. |
 | Settings | Opens over the running player and changes apply live. Covers chat (mode, channels, opacity, font size), default quality, ad strategy order, output resolution, encoder info and logout. |
 
 ### Android TV shell (`android-tv/`)
@@ -149,10 +152,23 @@ output:
   - inputs start near the live edge instead of replaying the playlist backlog
 - **Audio:** every tile has its own audio rendition. The client switches audio tracks in hls.js
   instantly, with no server round trip and no pipeline delay.
-- **Layouts as data:** a list of rectangles in normalized coordinates, plus z-order.
-  - Presets are starting points: 1+1 side by side, 2×2, 1 big + 2 small, 1 big + 3 small.
-  - Tiles can be moved and resized freely, with optional grid snapping.
-  - The result can be saved as your own preset.
+- **The grid:** the output is a fixed 16:9 canvas divided into **60 × 60 cells**. At 1080p a cell is
+  exactly 32 × 18 px.
+  - Every tile is a rectangle in whole cells `{x, y, w, h}` plus z-order. Overlaps are allowed; z
+    decides what's in front.
+  - **Equal width and height in cells means 16:9 in pixels.** A 30×30 tile is a quarter, a 40×40 tile
+    is two thirds, both the exact shape of a stream.
+  - 60 divides into halves, thirds, quarters, fifths and sixths, so common layouts line up without remainders.
+  - A stream whose tile isn't 16:9 is fitted inside it (letterboxed). "Fill" (crop) is a per-tile option.
+  - Because the server draws the grid into the video, the layout is **identical on every device**.
+    A screen with another aspect ratio shows the same 16:9 picture with black bars.
+- **Sessions:** a multiview session is a saved, named arrangement of tiles (channel + grid
+  rectangle), stored on the server. There is no limit on the number of sessions.
+  - Templates (1+1, 2×2, 1 big + 2 small, 1 big + 3 small) are only starting points for new sessions.
+  - **Opening a session** starts its pipeline, or joins it if it's already running: two devices on the
+    same session share one pipeline and see the same picture. Audio track and chat stay per device.
+  - **Editing a session** on any device updates the saved session and the running pipeline. Other devices
+    watching it receive a `session_updated` event, so their overlays follow.
 - **Editing feedback:** the video reaches the client a few seconds after the server composites it.
   While you drag or resize, the editor draws outlines over the video immediately. The server applies
   the new layout when you let go, and the video catches up a few seconds later.
@@ -162,8 +178,9 @@ output:
 - **Defaults:** output 1920×1080 at 30 fps, H.264, configurable. Tiles take the rendition just above
   their size (480p for 2×2). Measured in S3: about 1.75 cores of a Ryzen 9 3900X with x264 veryfast; 60 fps output
   nearly doubles that, and 720p inputs add ~60 %.
-- **Limits:** a configurable maximum number of concurrent sessions. A session is torn down when no
-  client has fetched it for N seconds.
+- **Limits:** saved sessions are unlimited, but the number of sessions **running** at once is
+  configurable, since each one costs ~2 cores in software. A running pipeline is torn down when no
+  client has fetched it for N seconds; the saved session stays.
 
 **Encoders and decoders** are probed at startup, in order: VA-API (`vah264enc` / `vah264lpenc`, `vah264dec`),
 then software (`x264enc` with a fast preset and zerolatency tuning, libav decoders). The chosen chain
@@ -269,14 +286,17 @@ REST + JSON under `/api`:
 | GET | `/api/search?q=` | Channel search |
 | GET | `/api/channels/{login}` | Channel and live info |
 | POST | `/api/play` | Single view → `{hls_url}` |
-| POST | `/api/multiview` | Create session `{layout, tiles[]}` → `{id, hls_url}` |
-| PATCH | `/api/multiview/{id}` | Change layout, replace or remove a tile |
-| DELETE | `/api/multiview/{id}` | Stop session |
+| GET | `/api/sessions` | All saved multiview sessions |
+| POST | `/api/sessions` | Create `{name, tiles[]}` (tile: `{channel, x, y, w, h, z, fit}` in grid cells) |
+| GET | `/api/sessions/{id}` | One session |
+| PATCH | `/api/sessions/{id}` | Rename, or change tiles; a running pipeline applies it live |
+| DELETE | `/api/sessions/{id}` | Delete a session (stops its pipeline) |
+| POST | `/api/sessions/{id}/play` | Start or join its pipeline → `{hls_url}` |
 | GET | `/api/system` | Diagnostics: encoder chain, sessions, load |
 
 WebSocket at `/api/ws`:
 
-- **Server → client:** `auth_changed`, `ad_break`, `ad_break_end`, `tile_state` (loading / live / offline), `chat_message`.
+- **Server → client:** `auth_changed`, `ad_break`, `ad_break_end`, `tile_state` (loading / live / offline), `session_updated`, `chat_message`.
 - **Client → server:** `chat_subscribe {channels[]}`. Every `chat_message` carries its channel, which
   is what the combined chat needs.
 
@@ -284,8 +304,8 @@ Playlists and segments are served under `/hls/...`.
 
 ## Storage
 
-A SQLite file in the `/data` volume holds tokens, server settings and saved multiview presets
-(including your own layouts). The Twitch client secret comes from the environment, not from the
+A SQLite file in the `/data` volume holds tokens, server settings and the multiview sessions
+(name + tiles in grid cells). The Twitch client secret comes from the environment, not from the
 database.
 
 Per-device UI settings (chat mode, chat geometry, font size, opacity) live in the client's

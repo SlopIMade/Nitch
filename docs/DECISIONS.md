@@ -124,3 +124,18 @@ The output timeline stays continuous.
 The CDN sends `access-control-allow-origin: *` (S2), so clients fetch the live segments themselves
 and the server only rewrites playlists. Proxying segments stays available as a fallback setting.
 Slate segments come from our server.
+
+### D17 — Fixed 60×60 grid; multiview sessions stored on the server
+*2026-11-02*
+
+The multiview canvas is a fixed 16:9 picture divided into 60 × 60 cells. Tiles are whole-cell
+rectangles plus z-order. Sessions (a name + tiles) are stored on the server, with no limit on their
+number, and every device sees the same sessions with the same layout. A different screen aspect ratio
+only adds black bars, because the layout lives in the server's video. Two devices on one session share
+its pipeline.
+**Why 60 and not 50 (the user's first idea):**
+- at 1080p a cell is exactly 32 × 18 px (with 50: 38.4 × 21.6)
+- 60 divides into halves, thirds, quarters, fifths and sixths
+- equal width and height in cells is exactly 16:9
+
+Refines D13: free placement now means grid-aligned placement, and "own presets" become sessions.
