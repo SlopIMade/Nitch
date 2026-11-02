@@ -136,7 +136,8 @@ move, resize and zoom the chat.
 - Settings screen: quality, ad strategy order, output resolution, access PIN
 - Diagnostics screen
 - Install guide and example compose file
-- GitHub repository + CI (build, tests, image)
+- [x] GitHub repository: private, `SlopIMade/Nitch` (D21)
+- CI: build, tests, image (GitHub Actions)
 
 ## M8 — Deployment on the target VM
 

@@ -182,3 +182,11 @@ The slate appears only if every source is in an ad at the same moment. The user 
 over showing Twitch's ad in that case. Per-break logs show how often it still happens.
 **Rejected:** a single backup, because in S1 `embed` and `picture-by-picture` had their ads at the
 same moments.
+
+### D21 — Private GitHub repository
+*2026-11-03*
+
+The repository is pushed to `SlopIMade/Nitch`, a **private** repo the user created; `main` is
+the default branch. Before the first push, the whole history was scanned: no credentials, tokens,
+signed Twitch URLs or session IDs. Raw recordings (`data/`) and `.env` stay git-ignored.
+Replaces "local git only" from D9. CI comes in M7.

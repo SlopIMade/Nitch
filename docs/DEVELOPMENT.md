@@ -62,7 +62,7 @@ bash <repo>/scripts/check-dev.sh
 |---|---|---|
 | Node.js LTS | M1 (spike page), M2 (web app) | `winget install OpenJS.NodeJS.LTS` |
 | Android Studio (SDK, emulator, JDK) | M5 | `winget install Google.AndroidStudio` |
-| GitHub CLI | when we connect GitHub | `winget install GitHub.cli` |
+| GitHub CLI (installed, logged in; also git's credential helper) | pushing to `SlopIMade/Nitch` | `winget install GitHub.cli` |
 | VS Code + WSL + rust-analyzer extensions | optional | `winget install Microsoft.VisualStudioCode` |
 
 For Android TV testing, open Android Studio's *Device Manager* and create a **TV** device (1080p,
