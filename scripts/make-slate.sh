@@ -44,4 +44,5 @@ open(sys.argv[2], "wb").write(init)
 open(sys.argv[3], "wb").write(media)
 print("boxes:", " ".join(k for k, _ in boxes))
 EOF
+
 ls -la "$out"

@@ -1,0 +1,16 @@
+[package]
+name = "nitch-media"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+gst-plugin-fallbackswitch = "0.15.4"
+gst-plugin-fmp4 = "0.14.5"
+gst-plugin-hlssink3 = "0.15.4"
+gstreamer = "0.25.4"
+tracing = "0.1.44"
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
