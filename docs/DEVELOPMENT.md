@@ -75,9 +75,9 @@ x86_64 image).
 - **Container test:** `docker compose up` in WSL, the same image as production.
 - **Android TV emulator:** reaches the server at `10.0.2.2:<port>`. mDNS doesn't pass through the
   emulator's NAT, so use manual entry there.
-- **Encoding on this PC:** software x264 (the 3900X has plenty of headroom). The RX 9070 XT might
-  work in WSL through Mesa's D3D12 VA-API driver, but that is experimental and optional. The GPU path
-  that matters has to be verified on the target VM anyway.
+- **Encoding on this PC:** software x264 only. WSL exposes the GPU as `/dev/dxg` but has no
+  `/dev/dri`, and GStreamer's VA plugin needs `/dev/dri`. That's fine: the 3900X has plenty of
+  headroom, and the GPU path that matters has to be verified on the target VM anyway.
 
 ## 5. Checks on the target server (Linux VM)
 

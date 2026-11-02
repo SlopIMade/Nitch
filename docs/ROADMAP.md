@@ -6,9 +6,9 @@ features are built on top of them.
 ## M0 — Foundations
 
 - [x] Stack decided, repository initialized, planning docs written
-- [ ] Dev environment on this PC (see [DEVELOPMENT.md](DEVELOPMENT.md))
+- [x] Dev environment on this PC (see [DEVELOPMENT.md](DEVELOPMENT.md)), verified with `scripts/check-dev.sh`
 - [ ] Target VM hardware check: `vainfo`, CPU, cores/RAM given to the VM
-- [ ] Pick the base distro/GStreamer version, the same for dev (WSL) and the production image
+- [x] Base distro/GStreamer version: Ubuntu 24.04 LTS / GStreamer 1.24.2 for dev and production ([D11](DECISIONS.md#d11--base-ubuntu-2404-lts-gstreamer-124))
 
 ## M1 — Spikes (throwaway code is fine)
 

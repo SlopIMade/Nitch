@@ -71,3 +71,11 @@ is unverified. VA-API is used when available, x264 otherwise.
 
 The Linux parts (Rust, GStreamer, Docker Engine) run in WSL2 Ubuntu; web and Android tooling run on
 Windows. We use Docker Engine inside WSL rather than Docker Desktop: it is lighter and has no licence questions.
+
+### D11 — Base: Ubuntu 24.04 LTS, GStreamer 1.24
+*2026-11-02*
+
+Dev (WSL) and the production image use the same release, so GStreamer versions match. Verified:
+gstreamer-rs 0.25 and gst-plugins-rs 0.15 (`fallbackswitch`, `fallbacksrc`, `hlssink3`, `hlscmafsink`)
+build, register statically and run against GStreamer 1.24.2.
+**Revisit** if we hit a bug that is only fixed in a newer GStreamer.
