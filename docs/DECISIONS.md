@@ -106,3 +106,21 @@ keep client overlays (focus frame, labels) in sync with the picture.
 
 The player is mounted at the app root and never unmounts on navigation. Settings, search and menus are
 layers on top of it, so changing a setting never stops a stream.
+
+### D15 — Ad gaps are always filled, never just dropped
+*2026-11-02*
+
+In S2, dropping ad segments froze the picture for *(gap − buffer)* seconds and left the player
+stuttering at the live edge. Ad segments are therefore replaced 1:1:
+1. by backup segments with the same `PROGRAM-DATE-TIME` (byte-identical in S2), or
+2. by pre-encoded slate segments.
+
+The output timeline stays continuous.
+**Rejected:** drop + client overlay only.
+
+### D16 — Single-view segments load directly from the Twitch CDN
+*2026-11-02*
+
+The CDN sends `access-control-allow-origin: *` (S2), so clients fetch the live segments themselves
+and the server only rewrites playlists. Proxying segments stays available as a fallback setting.
+Slate segments come from our server.

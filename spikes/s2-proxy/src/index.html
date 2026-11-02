@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Nitch S2</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #ddd; margin: 16px; }
+  video { width: 960px; max-width: 100%; background: #000; display: block; }
+  .row { margin: 8px 0; }
+  #ad { color: #fc6; font-weight: bold; min-height: 1.2em; }
+  #stats { font: 13px monospace; }
+  #log { font: 12px monospace; white-space: pre; height: 260px; overflow: auto; background: #000; padding: 8px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+</head>
+<body>
+<div class="row">
+  channel <input id="ch" value="lirik" size="12">
+  player <select id="pt"><option>site</option><option>embed</option><option>picture-by-picture</option></select>
+  rendition <input id="q" value="720p" size="6">
+  mode <select id="mode"><option>sim</option><option>drop</option><option>passthrough</option></select>
+  segments <select id="seg"><option>direct</option><option>proxy</option></select>
+  <button id="go">Play</button>
+</div>
+<video id="v" controls muted autoplay playsinline></video>
+<div class="row" id="ad"></div>
+<div class="row" id="stats"></div>
+<div id="log"></div>
+<script>
+// Everything the spike measures is also on window.s2, so it can be read from the console.
+const s2 = window.s2 = { events: [], hls: null, stalls: 0 };
+const $ = (id) => document.getElementById(id);
+const v = $('v');
+
+function log(kind, data) {
+  const t = new Date().toLocaleTimeString();
+  s2.events.push({ t, kind, data });
+  const el = $('log');
+  el.textContent += `${t} ${kind} ${data === undefined ? '' : JSON.stringify(data)}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function play() {
+  if (s2.hls) s2.hls.destroy();
+  s2.events = []; s2.stalls = 0; s2.cc = undefined; $('log').textContent = '';
+  const p = new URLSearchParams({ pt: $('pt').value, q: $('q').value, mode: $('mode').value, seg: $('seg').value });
+  const url = `/play/${encodeURIComponent($('ch').value)}/master.m3u8?${p}`;
+  log('load', url);
+  const hls = s2.hls = new Hls({ liveSyncDurationCount: 3 });
+  hls.on(Hls.Events.MANIFEST_PARSED, () => log('manifest_parsed'));
+  hls.on(Hls.Events.ERROR, (e, d) => log('error', {
+    type: d.type, details: d.details, fatal: d.fatal, code: d.response?.code,
+    url: (d.frag?.url || d.url || '').slice(0, 70),
+  }));
+  hls.on(Hls.Events.FRAG_CHANGED, (e, d) => {
+    if (s2.cc !== undefined && d.frag.cc !== s2.cc) log('discontinuity', { cc: d.frag.cc, sn: d.frag.sn });
+    s2.cc = d.frag.cc;
+  });
+  hls.loadSource(url);
+  hls.attachMedia(v);
+}
+
+let stalledSince = null;
+v.addEventListener('waiting', () => { s2.stalls++; stalledSince = performance.now(); log('waiting'); });
+v.addEventListener('playing', () => {
+  if (stalledSince) log('playing', { stalled_ms: Math.round(performance.now() - stalledSince) });
+  stalledSince = null;
+});
+
+setInterval(async () => {
+  const h = s2.hls;
+  if (!h) return;
+  const buffer = v.buffered.length ? v.buffered.end(v.buffered.length - 1) - v.currentTime : 0;
+  const pdt = h.playingDate;
+  s2.stats = {
+    time: +v.currentTime.toFixed(1),
+    buffer: +buffer.toFixed(1),
+    hls_latency: h.latency ? +h.latency.toFixed(1) : null,
+    // PROGRAM-DATE-TIME is Twitch's ingest time, so this is the full delay behind the streamer.
+    behind_streamer: pdt ? +((Date.now() - pdt.getTime()) / 1000).toFixed(1) : null,
+    stalls: s2.stalls,
+    paused: v.paused,
+  };
+  $('stats').textContent = JSON.stringify(s2.stats);
+  try {
+    const st = await (await fetch('/state')).json();
+    s2.state = st;
+    $('ad').textContent = st.some((x) => x.ad_now) ? 'AD BREAK: segments are being dropped' : '';
+  } catch {}
+}, 1000);
+
+$('go').onclick = play;
+</script>
+</body>
+</html>

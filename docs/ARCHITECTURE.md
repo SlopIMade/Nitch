@@ -107,8 +107,10 @@ Kotlin, a single Activity with a WebView. The UI is not bundled in the APK; it i
 1. Client: `POST /api/play {channel}` → server answers with `/hls/<id>/master.m3u8`.
 2. Server requests a playback access token (GQL, anonymous) and the usher master playlist
    (H.264 renditions; HEVC/AV1 renditions ignored for compatibility).
-3. Server rewrites the master and media playlists so they point to itself. Ad segments are handled
-   by `nitch-hls`. Segments are either proxied or point directly to the Twitch CDN (decided in spike S2).
+3. Server rewrites the master and media playlists so they point to itself, with its **own sequence
+   numbering**, shared by all renditions so quality switches stay aligned. Ad segments are handled
+   by `nitch-hls`. Live segments point **directly to the Twitch CDN**: CORS is open (S2), so the
+   server never touches the video bytes. Proxying stays available as a fallback setting.
 4. hls.js plays it with normal adaptive bitrate switching.
 
 This costs almost no CPU on the server.
@@ -212,12 +214,18 @@ which got the fewest video ads in S1.
 
 1. **Backup playlist:** request a second playback token with a different player type. In S1, `site`
    had live content while `embed` and `picture-by-picture` were in ad breaks; those two behaved
-   identically, so they count as one backup source. While the main playlist is in an ad break, splice
-   in the backup segments with `#EXT-X-DISCONTINUITY`. Good for multiview tiles and acceptable for
-   single view.
-2. **Drop + notify:** remove the ad segments and send `ad_break {channel, duration}` over the
-   WebSocket. The client shows "Ad break — back in ~0:30". In multiview, the tile shows its slate,
+   identically, so they count as one backup source. While the main playlist is in an ad break, its
+   ad segments are replaced by the backup's segments with the same `PROGRAM-DATE-TIME`. In S2 those
+   were **byte-identical** to the main playlist's live segments, so the swap is seamless. Keyed on
+   PDT, not on sequence numbers: a playlist in an ad break numbers its segments differently.
+2. **Slate + notify:** if no backup is live, replace each ad segment with a pre-encoded **slate
+   segment** of the same duration ("Ad break — back in …"), and send `ad_break {channel, duration}`
+   over the WebSocket so the client can show a countdown. In multiview, the tile shows its slate,
    and audio can automatically move to another tile (setting).
+
+**Never leave a hole.** S2 showed that simply dropping ad segments freezes the picture for
+*(gap − buffer)* seconds, after which the player sits at the live edge with a tiny buffer and stutters.
+The output timeline therefore always stays continuous.
 
 Playback tokens are always requested **anonymously**, never with the user's account.
 
