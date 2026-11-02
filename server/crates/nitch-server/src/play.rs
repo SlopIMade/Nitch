@@ -118,7 +118,7 @@ impl Player {
         Self { tw, sessions: Mutex::new(HashMap::new()), counter: AtomicU64::new(0) }
     }
 
-    fn new_id(&self) -> String {
+    pub fn new_id(&self) -> String {
         let n = self.counter.fetch_add(1, Ordering::Relaxed);
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
         format!("{:x}{n:x}", t & 0xffff_ffff_ffff)

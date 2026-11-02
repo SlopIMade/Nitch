@@ -14,10 +14,13 @@ use serde_json::json;
 
 use crate::auth::{Auth, AuthStatus};
 use crate::play::{PlayOptions, PlayStatus, Player};
+use crate::sessions::{self, Session, SessionInput, Template};
+use crate::store::Store;
 
 pub struct AppState {
     pub auth: Arc<Auth>,
     pub player: Player,
+    pub store: Arc<Store>,
     pub tw: nitch_twitch::Twitch,
 }
 
@@ -33,6 +36,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/channels/{login}", get(channel))
         .route("/api/play", post(play))
         .route("/api/play/{id}", get(play_status))
+        .route("/api/sessions", get(list_sessions).post(create_session))
+        .route("/api/sessions/templates", get(session_templates))
+        .route("/api/sessions/{id}", get(get_session).patch(update_session).delete(delete_session))
         .route("/hls/slate.ts", get(|| slate("video/mp2t", include_bytes!("../assets/slate.ts"))))
         .route("/hls/slate-init.mp4", get(|| slate("video/mp4", include_bytes!("../assets/slate-init.mp4"))))
         .route("/hls/slate.m4s", get(|| slate("video/iso.segment", include_bytes!("../assets/slate.m4s"))))
@@ -239,6 +245,52 @@ async fn play(State(s): St, Json(req): Json<PlayRequest>) -> ApiResult<serde_jso
 
 async fn play_status(State(s): St, Path(id): Path<String>) -> ApiResult<PlayStatus> {
     s.player.status(&id).map(Json).ok_or_else(|| ApiError::NotFound("unknown play session".into()))
+}
+
+// ---------- multiview sessions (D17) ----------
+
+async fn list_sessions(State(s): St) -> ApiResult<Vec<Session>> {
+    Ok(Json(s.store.sessions()?))
+}
+
+async fn session_templates() -> Json<Vec<Template>> {
+    Json(sessions::templates())
+}
+
+async fn get_session(State(s): St, Path(id): Path<String>) -> ApiResult<Session> {
+    s.store.session(&id)?.map(Json).ok_or_else(|| ApiError::NotFound("no such session".into()))
+}
+
+async fn create_session(State(s): St, Json(input): Json<SessionInput>) -> Result<Response, ApiError> {
+    let name = sessions::validate_name(input.name.as_deref().unwrap_or("Multiview")).map_err(ApiError::BadRequest)?;
+    let tiles = sessions::validate_tiles(input.tiles.unwrap_or_default()).map_err(ApiError::BadRequest)?;
+    let now = nitch_twitch::auth::now_unix();
+    let session = Session { id: s.player.new_id(), name, tiles, created_at: now, updated_at: now };
+    s.store.save_session(&session)?;
+    tracing::info!(id = %session.id, name = %session.name, tiles = session.tiles.len(), "session created");
+    Ok((StatusCode::CREATED, Json(session)).into_response())
+}
+
+async fn update_session(State(s): St, Path(id): Path<String>, Json(input): Json<SessionInput>) -> ApiResult<Session> {
+    let mut session = s.store.session(&id)?.ok_or_else(|| ApiError::NotFound("no such session".into()))?;
+    if let Some(name) = input.name {
+        session.name = sessions::validate_name(&name).map_err(ApiError::BadRequest)?;
+    }
+    if let Some(tiles) = input.tiles {
+        session.tiles = sessions::validate_tiles(tiles).map_err(ApiError::BadRequest)?;
+    }
+    session.updated_at = nitch_twitch::auth::now_unix();
+    s.store.save_session(&session)?;
+    Ok(Json(session))
+}
+
+async fn delete_session(State(s): St, Path(id): Path<String>) -> Result<StatusCode, ApiError> {
+    if s.store.delete_session(&id)? {
+        tracing::info!(%id, "session deleted");
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::NotFound("no such session".into()))
+    }
 }
 
 async fn slate(content_type: &'static str, bytes: &'static [u8]) -> Response {

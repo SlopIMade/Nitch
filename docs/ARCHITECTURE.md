@@ -326,6 +326,7 @@ REST + JSON under `/api`:
 | GET | `/api/play/{id}` | Ad status of a play session: `{ad: {from, until, filled_by}}` or `{ad: null}` |
 | GET | `/api/sessions` | All saved multiview sessions |
 | POST | `/api/sessions` | Create `{name, tiles[]}` (tile: `{channel, x, y, w, h, z, fit}` in grid cells) |
+| GET | `/api/sessions/templates` | Starting layouts (side by side, 2×2, 1 big + 2, 1 big + 3), every tile 16:9 |
 | GET | `/api/sessions/{id}` | One session |
 | PATCH | `/api/sessions/{id}` | Rename, or change tiles; a running pipeline applies it live |
 | DELETE | `/api/sessions/{id}` | Delete a session (stops its pipeline) |

@@ -87,7 +87,8 @@ playback resumes on its own. ✓ (with simulated ads)
 
 ## M4 — Multiview
 
-- Sessions stored on the server (SQLite), unlimited: CRUD API, tiles in 60×60 grid cells
+- [x] Sessions stored on the server (SQLite), unlimited: CRUD API, tiles in 60×60 grid cells,
+  validation (inside the grid, max 9 tiles), templates
 - Pipeline manager: one actor per **running** session, shared by every device that opens it;
   add / replace / remove tiles and change layouts at runtime; a slate per tile
 - `session_updated` events so all devices watching a session follow edits

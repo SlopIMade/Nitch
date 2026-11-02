@@ -4,6 +4,7 @@ mod api;
 mod auth;
 mod config;
 mod play;
+mod sessions;
 mod store;
 
 use std::sync::Arc;
@@ -27,7 +28,8 @@ async fn main() -> Result<()> {
     let store = Arc::new(store::Store::open(&config.data_dir.join("nitch.db"))?);
     let tw = nitch_twitch::Twitch::new(config.twitch.clone())?;
     let state = Arc::new(api::AppState {
-        auth: auth::Auth::load(tw.clone(), store)?,
+        auth: auth::Auth::load(tw.clone(), store.clone())?,
+        store,
         player: play::Player::new(tw.clone()),
         tw,
     });
