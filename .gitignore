@@ -1,0 +1,30 @@
+# Rust
+target/
+
+# Web
+node_modules/
+web/dist/
+
+# Android
+android-tv/.gradle/
+android-tv/build/
+android-tv/app/build/
+android-tv/local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Runtime data (SQLite, HLS output)
+data/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json

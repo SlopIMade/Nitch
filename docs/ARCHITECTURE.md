@@ -1,0 +1,248 @@
+# Architecture
+
+## Goals (v1)
+
+- Watch Twitch in a desktop browser and on Android TV (fully usable with a TV remote).
+- **Multiview:** several live streams merged by the server into one video.
+- **Ad breaks** are detected and handled by the server.
+- **One shared Twitch login** held by the server; on the TV you log in with your phone.
+- Home screen with followed live channels, channel search.
+- Read-only chat for the focused stream.
+- Runs as a Docker container on Linux, inside the home network.
+
+Not in v1 (see [Roadmap → Backlog](ROADMAP.md#backlog-after-v1)): profiles per person, sending chat,
+VODs/clips, notifications, remote access.
+
+## Overview
+
+```
+                 Twitch  (Helix API · GQL · usher HLS · CDN · chat)
+                                  ▲
+                                  │ HTTPS
+ ┌────────────────────────────────┴───────────────────────────────┐
+ │ Nitch server — Docker on Linux                                 │
+ │                                                                │
+ │  nitch-twitch   login (device code), Helix, playback tokens,   │
+ │                 chat reader                                    │
+ │  nitch-hls      playlist proxy, ad detection, ad strategies    │
+ │  nitch-media    GStreamer: decode → compositor → encode → HLS  │
+ │  nitch-server   REST + WebSocket API, serves the SPA, mDNS     │
+ └───────────────┬────────────────────────────────┬───────────────┘
+                 │ HTTP (LAN)                     │ HTTP (LAN)
+        ┌────────┴─────────┐             ┌────────┴──────────┐
+        │ Desktop browser  │             │ Android TV APK    │
+        │ React SPA        │             │ WebView → same SPA│
+        └──────────────────┘             └───────────────────┘
+```
+
+The client always plays **exactly one** HLS stream: either one Twitch stream passed through, or
+the server's merged multiview. That keeps the client light enough for cheap TV hardware.
+
+## Components
+
+### Server (`server/`, Rust)
+
+Cargo workspace, async runtime **tokio**, HTTP via **axum**, media via **gstreamer-rs**.
+
+| Crate | Responsibility |
+|---|---|
+| `nitch-server` | Binary. Config (env), HTTP/WebSocket API, serves the built SPA, mDNS advertisement, SQLite store, wiring. |
+| `nitch-twitch` | OAuth device code login + token refresh, Helix client, GQL playback access token + usher URLs, chat reader. |
+| `nitch-hls` | HLS proxy: polls Twitch playlists, rewrites them, detects ads, applies ad strategies, emits events. |
+| `nitch-media` | GStreamer multiview pipelines: tile inputs, layouts, compositor, encoders, HLS output, capability probing. |
+
+Each multiview session is an **actor**: one tokio task owns the GStreamer pipeline and receives
+commands (`SetLayout`, `ReplaceTile`, `RemoveTile`, `Stop`) over a channel. The API never touches a
+pipeline directly.
+
+Elements from **gst-plugins-rs** (`fallbackswitch`, `hlscmafsink`, later `webrtcsink`) are pulled in
+as Rust crates and registered statically, so the Docker image only needs stock GStreamer packages.
+
+### Web client (`web/`)
+
+**React + TypeScript + Vite**, with:
+
+- **Norigin Spatial Navigation**: focus handling for the TV remote (D-pad, OK, Back)
+- **hls.js**: playback, including audio track switching
+- **TanStack Query**: API data and caching
+- a QR code library for the login screen
+
+There is one UI for desktop and TV. Inside the TV shell it switches to a "10-foot" mode: larger type,
+visible focus rings, no hover-only controls. Everything you can click is also focusable.
+
+| Screen | Content |
+|---|---|
+| Connect | TV only, when no server is known: discovered servers + manual address. |
+| Login | Device code + QR code ("open twitch.tv/activate on your phone"). |
+| Home | Followed channels that are live: thumbnail, title, category, viewers. |
+| Search | Channel search, live channels first. TV uses the system on-screen keyboard. |
+| Player | Single stream, quality, ad-break overlay, chat panel. |
+| Multiview | Layout picker, fill tiles from follows/search; focused tile gets audio + chat. |
+| Settings | Default quality, ad strategy order, output resolution, encoder info, logout. |
+
+### Android TV shell (`android-tv/`)
+
+Kotlin, a single Activity with a WebView. The UI is not bundled in the APK; it is loaded from the server.
+
+- Leanback launcher entry + banner, so it appears on the TV home screen.
+- Finds the server via mDNS (`_nitch._tcp`) or manual entry, and remembers it.
+- Loads `http://<server>:<port>/` (cleartext allowed for local addresses only).
+- Remote keys: D-pad/OK arrive as arrow keys/Enter (WebView default). **Back** is forwarded to the
+  web app, which decides between "go back" and "exit". Media keys are forwarded as JS events.
+- Small JS bridge: keep the screen on during playback, app version, exit app.
+- Plan B if WebView playback turns out too slow: a native ExoPlayer surface behind the web UI.
+
+## Playback paths
+
+### Single view: passthrough, no re-encoding
+
+1. Client: `POST /api/play {channel}` → server answers with `/hls/<id>/master.m3u8`.
+2. Server requests a playback access token (GQL, anonymous) and the usher master playlist
+   (H.264 renditions; HEVC/AV1 renditions ignored for compatibility).
+3. Server rewrites the master and media playlists so they point to itself. Ad segments are handled
+   by `nitch-hls`. Segments are either proxied or point directly to the Twitch CDN (decided in spike S2).
+4. hls.js plays it with normal adaptive bitrate switching.
+
+This costs almost no CPU on the server.
+
+### Multiview: composite
+
+Each tile uses the **same ad-handled proxy playlist** as single view, consumed internally. For each
+tile the server picks the rendition just above the tile size, e.g. 480p or 720p for a 2×2 tile. That
+saves both decoding and bandwidth.
+
+One GStreamer pipeline per multiview session:
+
+```
+per tile N:
+  hlsdemux2 (internal proxy URL) ─► decodebin3 ─┬─► video ─► videoconvertscale ─► fallbackswitch ─► compositor.sink_N
+                                                │                                       ▲
+                                                │                         slate: loading / offline / ad break
+                                                │
+                                                └─► audio ─► audioconvert ─► fallbackswitch (silence) ─► AAC ─► audio rendition N
+
+output:
+  compositor ─► H.264 encoder (VA-API or x264) ─► hlscmafsink   (video)
+  audio rendition 1..N                        ─► hlscmafsink    (one per tile)
+  server writes master.m3u8: 1 video + N audio renditions (EXT-X-MEDIA TYPE=AUDIO)
+```
+
+- **Layout change:** set the compositor pad properties (`xpos`, `ypos`, `width`, `height`, `zorder`)
+  while the pipeline runs. No restart.
+- **Add, replace or remove a tile:** link or unlink a tile bin through dynamic pads while running.
+- **Stalls** (ad break without backup, streamer offline, network trouble): `fallbackswitch` shows that
+  tile's slate. The other tiles are not affected.
+- **Audio:** every tile has its own audio rendition. The client switches audio tracks in hls.js
+  instantly, with no server round trip and no pipeline delay.
+- **Layouts as data:** a list of rectangles in normalized coordinates. v1 ships 1+1 side by side,
+  2×2, 1 big + 2 small, and 1 big + 3 small; custom layouts come later.
+- **Defaults:** output 1920×1080 at 30 fps, H.264, configurable.
+- **Limits:** a configurable maximum number of concurrent sessions. A session is torn down when no
+  client has fetched it for N seconds.
+
+**Encoders and decoders** are probed at startup, in order: VA-API (`vah264enc` / `vah264lpenc`, `vah264dec`),
+then software (`x264enc` with a fast preset and zerolatency tuning, libav decoders). The chosen chain
+is shown in diagnostics.
+
+**Latency:** Twitch's own latency, plus roughly 3–6 s for multiview (segment length × buffered
+segments). LL-HLS or WebRTC (`webrtcsink`) can bring this down later.
+
+## Ad handling (`nitch-hls`)
+
+Twitch inserts ads into the HLS stream on its own servers. During an ad break the ad **replaces** the
+live content for that viewer, so there is no original video underneath to recover. "Removing ads"
+therefore means **detect, then substitute**.
+
+**Detection.** These are the markers in use today, the same ones streamlink relies on. Expect them
+to change:
+
+- `#EXT-X-DATERANGE` with `CLASS="twitch-stitched-ad"` (or an ID starting with `stitched-ad`),
+  including duration attributes
+- segments whose `#EXTINF` title is not `live`
+
+All detection rules live in one module, covered by tests that use recorded playlists (fixtures).
+When Twitch changes something, only that module and its fixtures need updating.
+
+**Strategy chain** (per stream, order configurable):
+
+1. **Backup playlist:** request a second playback token with different player parameters that
+   sometimes get no ads (often at lower quality). While the main playlist is in an ad break, splice
+   in the backup segments with `#EXT-X-DISCONTINUITY`. Good for multiview tiles and acceptable for
+   single view.
+2. **Drop + notify:** remove the ad segments and send `ad_break {channel, duration}` over the
+   WebSocket. The client shows "Ad break — back in ~0:30". In multiview, the tile shows its slate,
+   and audio can automatically move to another tile (setting).
+
+Playback tokens are always requested **anonymously**, never with the user's account.
+
+## Twitch integration (`nitch-twitch`)
+
+- **App registration:** you register an app at dev.twitch.tv; its Client ID and secret go into the
+  server environment. It is registered as a *confidential* client. Refresh tokens of public clients
+  expire after 30 days (verify in M2).
+- **Login:** OAuth device code grant flow.
+  1. The server starts the flow.
+  2. The client shows the `user_code` and a QR code of the verification URL.
+  3. The server polls until you confirm on your phone, then stores the tokens in SQLite and refreshes them.
+
+  There is one shared account: logging in on any device logs in all devices. Clients never see the tokens.
+- **Scopes:** `user:read:follows`, plus `user:read:chat` if chat later moves to EventSub.
+- **Helix (official API):** Get Followed Streams, Search Channels, Get Users, Get Streams.
+- **GQL (unofficial, the same thing the browser player and streamlink use):** the playback access token
+  and the usher master playlist. This is isolated in its own module because it can break without notice.
+- **Chat (read-only):** anonymous IRC over WebSocket (`irc-ws.chat.twitch.tv`). One connection that
+  joins and leaves channels as focus changes and parses tags (emotes, badges, colors); messages are fanned
+  out over our WebSocket. It sits behind a trait so EventSub can replace it.
+
+## Server API (sketch)
+
+REST + JSON under `/api`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Health and version |
+| GET | `/api/auth` | Login state and user |
+| POST | `/api/auth/device` | Start device login → `{user_code, verification_uri, expires_in}` |
+| DELETE | `/api/auth` | Log out |
+| GET | `/api/follows/live` | Followed channels that are live |
+| GET | `/api/search?q=` | Channel search |
+| GET | `/api/channels/{login}` | Channel and live info |
+| POST | `/api/play` | Single view → `{hls_url}` |
+| POST | `/api/multiview` | Create session `{layout, tiles[]}` → `{id, hls_url}` |
+| PATCH | `/api/multiview/{id}` | Change layout, replace or remove a tile |
+| DELETE | `/api/multiview/{id}` | Stop session |
+| GET | `/api/system` | Diagnostics: encoder chain, sessions, load |
+
+WebSocket at `/api/ws`:
+
+- **Server → client:** `auth_changed`, `ad_break`, `ad_break_end`, `tile_state` (loading / live / offline), `chat_message`.
+- **Client → server:** `chat_subscribe {channel}`.
+
+Playlists and segments are served under `/hls/...`.
+
+## Storage
+
+A SQLite file in the `/data` volume holds tokens, settings and saved multiview presets. The Twitch
+client secret comes from the environment, not from the database.
+
+## Deployment
+
+- **One Docker image**, built in stages:
+  1. Build the Rust server against the GStreamer dev libraries.
+  2. Build the web app.
+  3. Runtime image: same distro release as the build stage, with the GStreamer runtime, VA drivers,
+     our binary, and the SPA in `/app/web`.
+- **compose:**
+  - `network_mode: host` (needed for mDNS)
+  - volume `/data`
+  - env file
+  - optional `devices: [/dev/dri]`
+- **Target:** a Linux VM with an AMD iGPU passed through via QEMU VirGL. Hardware video support there
+  is **not verified yet** (see [Roadmap → M0](ROADMAP.md#m0--foundations)). Software encoding is
+  always available as a fallback.
+
+## Security
+
+- LAN only; never port-forward the server.
+- The server holds the Twitch tokens and never hands them to clients.
+- Any device on the LAN can use the API. v1 offers an optional access PIN.

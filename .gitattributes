@@ -1,0 +1,13 @@
+# Normalize to LF: the server and its scripts run on Linux / in Docker.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.jar binary
