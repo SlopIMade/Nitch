@@ -192,20 +192,27 @@ Twitch inserts ads into the HLS stream on its own servers. During an ad break th
 live content for that viewer, so there is no original video underneath to recover. "Removing ads"
 therefore means **detect, then substitute**.
 
-**Detection.** These are the markers in use today, the same ones streamlink relies on. Expect them
-to change:
+**Detection.** These are the markers observed in spike S1
+([findings](../spikes/s1-twitch-playback/FINDINGS.md)), in order of reliability. Expect them to change:
 
-- `#EXT-X-DATERANGE` with `CLASS="twitch-stitched-ad"` (or an ID starting with `stitched-ad`),
-  including duration attributes
-- segments whose `#EXTINF` title is not `live`
+1. `#EXT-X-DATERANGE` with `CLASS="twitch-stitched-ad"`. It appears about 4 s *before* the first ad
+   segment and carries `DURATION` and `X-TV-TWITCH-AD-POD-FILLED-DURATION` (the length of the whole
+   break). It is mapped onto segments via `START-DATE` and the segments' `PROGRAM-DATE-TIME`.
+2. Segments whose `#EXTINF` title is not `live` (ads are titled `Amazon|<creative id>`).
+3. The `twitch-stream-source` DATERANGE switching from `live` to something else.
+
+`twitch-maf-ad` DATERANGEs are display ads that the web player shows next to the video. They don't
+affect the segments and are ignored.
 
 All detection rules live in one module, covered by tests that use recorded playlists (fixtures).
 When Twitch changes something, only that module and its fixtures need updating.
 
-**Strategy chain** (per stream, order configurable):
+**Strategy chain** (per stream, order configurable). The primary playlist uses player type `site`,
+which got the fewest video ads in S1.
 
-1. **Backup playlist:** request a second playback token with different player parameters that
-   sometimes get no ads (often at lower quality). While the main playlist is in an ad break, splice
+1. **Backup playlist:** request a second playback token with a different player type. In S1, `site`
+   had live content while `embed` and `picture-by-picture` were in ad breaks; those two behaved
+   identically, so they count as one backup source. While the main playlist is in an ad break, splice
    in the backup segments with `#EXT-X-DISCONTINUITY`. Good for multiview tiles and acceptable for
    single view.
 2. **Drop + notify:** remove the ad segments and send `ad_break {channel, duration}` over the

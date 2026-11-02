@@ -12,11 +12,14 @@ features are built on top of them.
 
 ## M1 — Spikes (throwaway code is fine)
 
-- **S1 Twitch playback:** fetch a playback token and master playlist for a channel, follow the
+- [x] **S1 Twitch playback:** fetch a playback token and master playlist for a channel, follow the
   media playlist for a while, and log the ad markers. Record playlists from real ad breaks as test fixtures.
+  → [findings](../spikes/s1-twitch-playback/FINDINGS.md): works without login; ad markers appear ~4 s
+  early; player types get ads at different times.
 - **S2 Proxy:** minimal axum proxy that rewrites playlists, plus a plain HTML page with hls.js
   that plays it. Test what dropped ad segments do to the player (stall, resume, jump back to live)
-  and whether segments can come straight from the Twitch CDN (CORS).
+  and whether segments can come straight from the Twitch CDN (CORS). From S1: check whether the
+  `site` and `embed` playlists share one `PROGRAM-DATE-TIME` timeline (segment-exact backup splicing).
 - **S3 Composite:** GStreamer 2×2 from 4 live channels → HLS with software encoding, measuring CPU.
   Then the same with VA-API on the target VM.
 - **S4 Dynamic changes:** while S3 runs, move and resize tiles, replace one input and kill one input
