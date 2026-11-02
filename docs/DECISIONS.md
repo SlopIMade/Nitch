@@ -169,3 +169,16 @@ Refines D15.
 **Rejected:**
 - 1:1 swap by sequence number or PDT: drifts after the first ad.
 - Keeping Twitch's numbering: shifts during ads.
+
+### D20 — The real stream from a backup chain; the slate only as the last resort
+*2026-11-03*
+
+The user wants the actual stream during ads, not a placeholder. During an ad the server therefore
+fetches the same rendition from several backup player types in priority order (`embed`, `popout`,
+`autoplay`, `frontpage`), each its own Twitch session with its own ad schedule. The first one with
+the live segment wins. It only costs a playlist request per source and refresh, never video.
+
+The slate appears only if every source is in an ad at the same moment. The user chose the slate
+over showing Twitch's ad in that case. Per-break logs show how often it still happens.
+**Rejected:** a single backup, because in S1 `embed` and `picture-by-picture` had their ads at the
+same moments.

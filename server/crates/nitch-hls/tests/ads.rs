@@ -79,7 +79,7 @@ fn backup_replaces_ads_seamlessly() {
     for (i, text) in EMBED.iter().enumerate() {
         let primary = parse(text);
         let backup = backup_like(&primary);
-        tl.update(0, &primary, Some(&backup));
+        tl.update(0, &primary, &[Some(&backup)]);
         let out = tl.render(0, &SLATES);
         assert!(!out.contains("Amazon"), "no ad segment in the output");
         assert!(!out.contains("slate"), "backup covers the whole break");
@@ -95,12 +95,40 @@ fn backup_replaces_ads_seamlessly() {
 }
 
 #[test]
+fn second_backup_covers_where_the_first_is_in_an_ad() {
+    // The first backup has its own ad during the first 30 s of the primary's break; the second
+    // backup is live throughout. Expect: real stream everywhere, no slate.
+    let ad_start = parse_pdt("2026-11-02T20:00:31.787Z").unwrap();
+    let mut tl = Timeline::new();
+    for text in EMBED {
+        let primary = parse(text);
+        let mut first = backup_like(&primary);
+        for s in &mut first.segments {
+            let p = s.pdt.unwrap();
+            s.ad = (ad_start..ad_start + 30_000).contains(&p);
+        }
+        let second = parse(&backup_like(&primary).segments.iter().fold(
+            "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:1\n".to_string(),
+            |acc, s| acc + &format!("#EXT-X-PROGRAM-DATE-TIME:{}\n#EXTINF:2.000,live\nhttps://backup2.example/{}.ts\n", format_pdt(s.pdt.unwrap()), s.pdt.unwrap()),
+        ));
+        tl.update(0, &primary, &[Some(&first), Some(&second)]);
+        let out = tl.render(0, &SLATES);
+        assert!(!out.contains("slate") && !out.contains("Amazon"), "only real stream content");
+    }
+    let since = tl.origins_since(ad_start);
+    let (b0, b1) = (since.get(&Origin::Backup(0)).copied().unwrap_or(0), since.get(&Origin::Backup(1)).copied().unwrap_or(0));
+    assert!((14..=16).contains(&b1), "second backup fills the first's ad: {since:?}");
+    assert!(b0 >= 14, "first backup covers the rest of the break: {since:?}");
+    assert_eq!(since.get(&Origin::Slate), None);
+}
+
+#[test]
 fn slates_fill_an_ad_without_backup() {
     let mut tl = Timeline::new();
     let (mut last_seq, mut last_disc) = (0, 0);
     let mut slates_seen = std::collections::BTreeSet::new();
     for text in EMBED {
-        tl.update(0, &parse(text), None);
+        tl.update(0, &parse(text), &[]);
         let out = tl.render(0, &SLATES);
         assert!(!out.contains("Amazon"));
         let (seq, disc) = (header(&out, "#EXT-X-MEDIA-SEQUENCE:"), header(&out, "#EXT-X-DISCONTINUITY-SEQUENCE:"));
@@ -131,8 +159,8 @@ fn renditions_share_numbering() {
     let mut tl = Timeline::new();
     for text in EMBED {
         let other = text.replace("cdn.example", "cdn2.example");
-        tl.update(0, &parse(text), None);
-        tl.update(1, &parse(&other), None);
+        tl.update(0, &parse(text), &[]);
+        tl.update(1, &parse(&other), &[]);
     }
     let (a, b) = (tl.render(0, &SLATES), tl.render(1, &SLATES));
     assert_eq!(header(&a, "#EXT-X-MEDIA-SEQUENCE:"), header(&b, "#EXT-X-MEDIA-SEQUENCE:"));
@@ -165,7 +193,7 @@ fn every_ad_segment_becomes_exactly_one_slate() {
             for s in &mut pl.segments {
                 s.ad = (30..45).contains(&(s.seq as i64));
             }
-            tl.update(0, &pl, None);
+            tl.update(0, &pl, &[]);
             let out = tl.render(0, &SLATES);
             let mut seq = header(&out, "#EXT-X-MEDIA-SEQUENCE:");
             for line in out.lines().filter(|l| l.starts_with("#EXTINF")) {

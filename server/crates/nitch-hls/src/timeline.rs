@@ -5,9 +5,11 @@
 //! session and numbers entries in time order, so quality switches stay aligned. For each stretch
 //! of time it takes, in this order:
 //! 1. the primary playlist's live segment,
-//! 2. during an ad, the backup playlist's live segment at the same time (byte-identical, so the swap
-//!    is seamless and needs no discontinuity),
-//! 3. otherwise a slate segment of the usual length, once it's certain no live segment will come.
+//! 2. during an ad, the first backup (in priority order) that has the live segment at that time.
+//!    It's byte-identical, so the swap is seamless and needs no discontinuity. Every backup is
+//!    its own Twitch session with its own ad schedule, so more backups mean fewer slates,
+//! 3. only if every source is in an ad: a slate segment of the usual length, once it's certain
+//!    no live segment will come.
 //!
 //! Ad segments never reach the output, and the timeline never has a hole (S2).
 
@@ -23,13 +25,14 @@ pub const WINDOW: usize = 15;
 const KEEP: usize = 90;
 /// Two segment times closer than this are the same segment.
 const TOLERANCE_MS: i64 = 150;
-/// A stretch without live content waits this long for the backup before it becomes a slate.
+/// A stretch without live content waits this long for the backups before it becomes a slate.
 const GRACE_MS: i64 = 4000;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Origin {
     Primary,
-    Backup,
+    /// Index into the backup list passed to [`Timeline::update`].
+    Backup(usize),
     Slate,
 }
 
@@ -90,9 +93,9 @@ impl Timeline {
         Self { entries: VecDeque::new(), next_seq: 0, pruned_disc: 0, nominal: 2.0, sources: HashMap::new() }
     }
 
-    /// Takes a fresh primary playlist of `rendition` (and the backup's, during ads) and extends
-    /// the timeline as far as possible.
-    pub fn update(&mut self, rendition: usize, primary: &MediaPlaylist, backup: Option<&MediaPlaylist>) {
+    /// Takes a fresh primary playlist of `rendition` (and, during ads, the backups' in priority
+    /// order; `None` where a backup isn't available) and extends the timeline as far as possible.
+    pub fn update(&mut self, rendition: usize, primary: &MediaPlaylist, backups: &[Option<&MediaPlaylist>]) {
         let sources = self.sources.entry(rendition).or_default();
         let mut live: BTreeMap<i64, Candidate> = BTreeMap::new();
 
@@ -108,14 +111,16 @@ impl Timeline {
                 self.nominal = s.duration;
             }
         }
-        if let Some(backup) = backup {
+        // Earlier backups win: a time already covered (by the primary or a better backup) is skipped.
+        for (index, backup) in backups.iter().enumerate() {
+            let Some(backup) = backup else { continue };
             for s in backup.segments.iter().filter(|s| !s.ad) {
                 let Some(pdt) = s.pdt else { continue };
                 if live.range(pdt - TOLERANCE_MS..=pdt + TOLERANCE_MS).next().is_some() {
                     continue;
                 }
                 sources.entry(pdt).or_insert(Source { uri: s.uri.clone(), map: s.map.clone() });
-                live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Backup, genuine_disc: false });
+                live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Backup(index), genuine_disc: false });
             }
         }
 
@@ -182,6 +187,15 @@ impl Timeline {
     /// True if any of the newest `n` entries is a slate.
     pub fn recent_slate(&self, n: usize) -> bool {
         self.entries.iter().rev().take(n).any(|e| e.origin == Origin::Slate)
+    }
+
+    /// How many entries since stream time `from` came from each origin (for logging a break).
+    pub fn origins_since(&self, from: i64) -> HashMap<Origin, usize> {
+        let mut counts = HashMap::new();
+        for e in self.entries.iter().filter(|e| e.start + TOLERANCE_MS >= from) {
+            *counts.entry(e.origin).or_insert(0) += 1;
+        }
+        counts
     }
 
     /// The media playlist for `rendition`.

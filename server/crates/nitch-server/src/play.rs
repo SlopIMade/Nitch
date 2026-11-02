@@ -1,7 +1,9 @@
-//! Single view (D1/D15/D16): the server builds an ad-free playlist per rendition, and clients load
-//! the live segments straight from the CDN. During ads the server fetches the same rendition
-//! from the backup player type and splices its segments in; if that's in an ad too, slates fill
-//! the time. Each `POST /api/play` creates a short-lived play session.
+//! Single view (D1/D15/D16/D19): the server builds an ad-free playlist per rendition, and clients
+//! load the live segments straight from the CDN. During ads the server fetches the same rendition
+//! from a chain of backup sources (other player types, each its own Twitch session with its own
+//! ad schedule) and splices in the first one that has the real stream at that moment. Only if
+//! every source is in an ad does a slate fill the time. Each `POST /api/play` creates a short-lived
+//! play session.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -19,25 +21,34 @@ use url::Url;
 
 /// Play sessions nobody fetched for this long are dropped.
 const IDLE: Duration = Duration::from_secs(10 * 60);
-/// Player type for the backup source (S1: got its ads at other times than `site`).
-pub const BACKUP_PLAYER_TYPE: &str = "embed";
-/// After the backup failed to resolve, wait this long before trying again.
+/// Backup sources in priority order. `embed` got its ads at other times than `site` in S1; the
+/// others add independent sessions so that some source is ad-free as often as possible.
+pub const BACKUP_PLAYER_TYPES: &[&str] = &["embed", "popout", "autoplay", "frontpage"];
+/// After a backup failed to resolve, wait this long before trying it again.
 const BACKUP_RETRY: Duration = Duration::from_secs(30);
 
 pub const SLATES: Slates = Slates { ts: "/hls/slate.ts", fmp4_init: "/hls/slate-init.mp4", fmp4: "/hls/slate.m4s" };
 
-/// Options for a play session. Everything but the channel is for testing ad handling.
+/// Options for a play session. Everything but the defaults is for testing ad handling.
 #[derive(Debug, Clone)]
 pub struct PlayOptions {
     pub player_type: String,
-    pub backup: bool,
+    /// Backup player types in priority order; empty disables backups (ads become slates).
+    pub backups: Vec<String>,
     /// Treat 30 s of every 2 minutes as an ad.
     pub simulate_ads: bool,
 }
 
+impl PlayOptions {
+    pub fn new(player_type: &str) -> Self {
+        let backups = BACKUP_PLAYER_TYPES.iter().filter(|p| **p != player_type).map(|p| p.to_string()).collect();
+        Self { player_type: player_type.into(), backups, simulate_ads: false }
+    }
+}
+
 impl Default for PlayOptions {
     fn default() -> Self {
-        Self { player_type: PRIMARY_PLAYER_TYPE.into(), backup: true, simulate_ads: false }
+        Self::new(PRIMARY_PLAYER_TYPE)
     }
 }
 
@@ -66,14 +77,22 @@ pub struct AdStatus {
     pub filled_by: FilledBy,
 }
 
+/// One backup source; its master playlist is resolved lazily, at the first ad.
+struct Backup {
+    player_type: String,
+    master: Option<Master>,
+    failed: Option<Instant>,
+}
+
 struct PlaySession {
     channel: String,
     options: PlayOptions,
     primary: Master,
-    backup: Option<Master>,
-    backup_failed: Option<Instant>,
+    backups: Vec<Backup>,
     timeline: Timeline,
     status: PlayStatus,
+    /// Start of the current ad break in stream time (the playlist window's start moves on).
+    break_from: Option<i64>,
     last_access: Instant,
 }
 
@@ -111,6 +130,11 @@ impl Player {
         let id = self.new_id();
         tracing::info!(%channel, %id, ?options, renditions = primary.variants.len(), "play session started");
         let channel = channel.to_lowercase();
+        let backups = options
+            .backups
+            .iter()
+            .map(|p| Backup { player_type: p.clone(), master: None, failed: None })
+            .collect();
         let mut sessions = self.sessions.lock().unwrap();
         sessions.retain(|_, s| s.last_access.elapsed() < IDLE);
         sessions.insert(
@@ -120,9 +144,9 @@ impl Player {
                 channel,
                 options,
                 primary,
-                backup: None,
-                backup_failed: None,
+                backups,
                 timeline: Timeline::new(),
+                break_from: None,
                 last_access: Instant::now(),
             },
         );
@@ -153,15 +177,17 @@ impl Player {
         if options.simulate_ads {
             primary.simulate_ads(120, 30);
         }
-        let backup = if options.backup && primary.has_ads() {
-            self.fetch_backup(id, &channel, index).await
+        let backups: Vec<Option<MediaPlaylist>> = if primary.has_ads() {
+            let fetches = (0..options.backups.len()).map(|k| self.fetch_backup(id, &channel, index, k));
+            futures::future::join_all(fetches).await
         } else {
-            None
+            Vec::new()
         };
 
         let mut sessions = self.sessions.lock().unwrap();
         let Some(s) = sessions.get_mut(id) else { return Ok(None) };
-        s.timeline.update(index, &primary, backup.as_ref());
+        let refs: Vec<Option<&MediaPlaylist>> = backups.iter().map(Option::as_ref).collect();
+        s.timeline.update(index, &primary, &refs);
         update_status(s, &primary);
         Ok(Some(s.timeline.render(index, &SLATES)))
     }
@@ -198,27 +224,31 @@ impl Player {
         parse_media(&text, &url)
     }
 
-    /// Backup media playlist for the same rendition, or `None` if it isn't available right now.
-    async fn fetch_backup(&self, id: &str, channel: &str, index: usize) -> Option<MediaPlaylist> {
-        let (known, may_retry) = self.with(id, |s| {
-            let known = s.backup.as_ref().and_then(|b| matching_variant(b, &s.primary, index));
-            Some((known, s.backup_failed.is_none_or(|t| t.elapsed() > BACKUP_RETRY)))
+    /// Media playlist of backup `k` for the same rendition, or `None` if it isn't available now.
+    async fn fetch_backup(&self, id: &str, channel: &str, index: usize, k: usize) -> Option<MediaPlaylist> {
+        // `Some(None)`: resolved, but this source doesn't offer the rendition (e.g. `autoplay`
+        // only has a few); skip it for this rendition instead of resolving it again and again.
+        let (known, may_retry, player_type) = self.with(id, |s| {
+            let b = s.backups.get(k)?;
+            let known = b.master.as_ref().map(|m| matching_variant(m, &s.primary, index));
+            Some((known, b.failed.is_none_or(|t| t.elapsed() > BACKUP_RETRY), b.player_type.clone()))
         })?;
         let url = match known {
-            Some(u) => u,
-            None if may_retry => match self.tw.master_playlist(channel, BACKUP_PLAYER_TYPE).await {
+            Some(Some(u)) => u,
+            Some(None) => return None,
+            None if may_retry => match self.tw.master_playlist(channel, &player_type).await {
                 Ok(master) => {
-                    tracing::info!(%channel, "backup source resolved");
+                    tracing::info!(%channel, %player_type, "backup source resolved");
                     self.with(id, |s| {
                         let url = matching_variant(&master, &s.primary, index);
-                        s.backup = Some(master);
+                        s.backups[k].master = Some(master);
                         url
                     })?
                 }
                 Err(e) => {
-                    tracing::warn!(%channel, "backup source unavailable: {e:#}");
+                    tracing::warn!(%channel, %player_type, "backup source unavailable: {e:#}");
                     self.with(id, |s| {
-                        s.backup_failed = Some(Instant::now());
+                        s.backups[k].failed = Some(Instant::now());
                         Some(())
                     });
                     return None;
@@ -229,15 +259,15 @@ impl Player {
         match self.tw.get_text(&url).await {
             Ok((status, text)) if status.is_success() => parse_media(&text, &url).ok(),
             Ok((status, _)) => {
-                tracing::info!(%channel, %status, "backup playlist rejected, will resolve it again");
+                tracing::info!(%channel, %player_type, %status, "backup playlist rejected, will resolve it again");
                 self.with(id, |s| {
-                    s.backup = None;
+                    s.backups[k].master = None;
                     Some(())
                 });
                 None
             }
             Err(e) => {
-                tracing::warn!(%channel, "fetching the backup failed: {e:#}");
+                tracing::warn!(%channel, %player_type, "fetching the backup failed: {e:#}");
                 None
             }
         }
@@ -248,14 +278,37 @@ fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
     let ad = primary.ad_window().map(|(from, until)| AdStatus {
         from,
         until,
-        filled_by: if !s.options.backup || s.timeline.recent_slate(3) { FilledBy::Slate } else { FilledBy::Backup },
+        filled_by: if s.options.backups.is_empty() || s.timeline.recent_slate(3) {
+            FilledBy::Slate
+        } else {
+            FilledBy::Backup
+        },
     });
+    if let Some(a) = &ad {
+        s.break_from = Some(s.break_from.map_or(a.from, |f| f.min(a.from)));
+    }
     let before = s.status.ad.as_ref().map(|a| a.filled_by);
     let after = ad.as_ref().map(|a| a.filled_by);
     if before != after {
-        match after {
-            Some(by) => tracing::info!(channel = %s.channel, ?by, "ad break"),
-            None => tracing::info!(channel = %s.channel, last = ?s.timeline.last_origin().unwrap_or(Origin::Primary), "ad break over"),
+        match (s.break_from, after) {
+            (_, Some(by)) => tracing::info!(channel = %s.channel, ?by, "ad break"),
+            // The break is over: report which source filled how much of it.
+            (Some(from), None) => {
+                s.break_from = None;
+                let mut parts: Vec<String> = s
+                    .timeline
+                    .origins_since(from)
+                    .into_iter()
+                    .map(|(origin, n)| match origin {
+                        Origin::Primary => format!("primary={n}"),
+                        Origin::Backup(k) => format!("{}={n}", s.options.backups.get(k).map_or("?", String::as_str)),
+                        Origin::Slate => format!("slate={n}"),
+                    })
+                    .collect();
+                parts.sort();
+                tracing::info!(channel = %s.channel, filled = %parts.join(" "), "ad break over (segments per source)");
+            }
+            (None, None) => {}
         }
     }
     s.status.ad = ad;

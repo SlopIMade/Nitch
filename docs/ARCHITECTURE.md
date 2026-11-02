@@ -247,16 +247,22 @@ When Twitch changes something, only that module and its fixtures need updating.
 **Strategy chain** (per stream, order configurable). The primary playlist uses player type `site`,
 which got the fewest video ads in S1.
 
-1. **Backup playlist:** request a second playback token with a different player type. In S1, `site`
-   had live content while `embed` and `picture-by-picture` were in ad breaks; those two behaved
-   identically, so they count as one backup source. While the main playlist is in an ad break, its
-   ad segments are replaced by the backup's segments with the same `PROGRAM-DATE-TIME`. In S2 those
-   were **byte-identical** to the main playlist's live segments, so the swap is seamless. Keyed on
-   PDT, not on sequence numbers: a playlist in an ad break numbers its segments differently.
-2. **Slate + notify:** if no backup is live, replace each ad segment with a pre-encoded **slate
-   segment** of the same duration ("Ad break — back in …"), and send `ad_break {channel, duration}`
-   over the WebSocket so the client can show a countdown. In multiview, the tile shows its slate,
-   and audio can automatically move to another tile (setting).
+1. **The real stream from a backup chain** (D20): while the main playlist is in an ad break, the
+   server fetches the same rendition from **several backup sources in priority order**
+   (`embed`, `popout`, `autoplay`, `frontpage`). Each is its own Twitch session with its own ad
+   schedule. For every stretch of time, the first backup with the live segment at that
+   `PROGRAM-DATE-TIME` wins. Those segments are **byte-identical** to the main playlist's (S2), so you
+   see the actual stream, without a visible swap.
+   - In S1, `embed` and `picture-by-picture` had their ads at the same moments, so
+     `picture-by-picture` isn't in the chain.
+   - A source that doesn't offer a rendition (`autoplay` has only a few) is skipped for it.
+2. **Slate, only as the last resort** (the user's choice): if *every* source is in an ad at that
+   moment, a pre-encoded **slate segment** of the usual length ("Ad break — back in …") fills it, and
+   the client shows a countdown. In multiview, the tile shows its slate, and audio can
+   automatically move to another tile (setting).
+
+After every break the server logs how many segments each source filled
+(e.g. `filled=embed=16 primary=13`), so we see how often slates still happen.
 
 **Never leave a hole.** S2 showed that simply dropping ad segments freezes the picture for
 *(gap − buffer)* seconds, after which the player sits at the live edge with a tiny buffer and stutters.
@@ -272,7 +278,7 @@ So each play session keeps **one timeline shared by all renditions**:
   `site` and `embed` (S2).
 - **Each stretch of time gets exactly one entry:**
   1. the primary's live segment
-  2. else the backup's live segment at the same time
+  2. else the live segment at the same time from the first backup in the chain that has it
   3. else a slate of the usual segment length, once no live segment can still come: either live
      content resumes later, or the primary has moved ≥ 4 s past it
 - **Our own numbering, the same in every rendition,** keeps quality switches aligned.

@@ -62,6 +62,8 @@ one stream served by the container on the VM.
 - [x] Ad detection module with fixture tests (S1 recordings, sanitized with `scripts/sanitize-playlist.py`)
 - [x] Output timeline keyed on `PROGRAM-DATE-TIME` and shared by all renditions:
   backup segments during ads, otherwise slates. Never leaves a gap (S2, D19).
+- [x] Backup **chain** (`embed`, `popout`, `autoplay`, `frontpage`), so the real stream plays
+  whenever any source is ad-free; the slate only when all are in an ad (D20)
 - [x] Slate segments, MPEG-TS and fMP4 (`scripts/make-slate.sh`)
 - [x] Client badge: "Ad skipped" (backup) or "Ad break · back in …" (slate), timed to the playback position
 - [x] Log which strategy filled each break
@@ -70,11 +72,15 @@ one stream served by the container on the VM.
 
 Tested on 2026-11-02 in the browser with simulated ads on a live channel:
 - **backup:** seamless, no stall
-- **slate:** the slate plays for exactly the ad stretch, then back to live on its own
+- **slate** (backups switched off on purpose): the slate plays for exactly the ad stretch, then
+  back to live on its own
+- **backup chain** (2026-11-03): each source resolved once, `embed` filled all 16 segments of the
+  simulated break, no slate
 
 Still open:
 - a *real* Twitch ad replaced live (none came up on `site` during the tests)
 - the fMP4 slate in the browser (no fMP4 channel was live)
+- how often all sources are in an ad at once, read from the per-break logs in real use
 
 **Done when:** an ad break in single view shows either backup content or a clean overlay, and
 playback resumes on its own. ✓ (with simulated ads)

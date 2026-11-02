@@ -222,14 +222,16 @@ async fn play(State(s): St, Json(req): Json<PlayRequest>) -> ApiResult<serde_jso
     if channel.is_empty() || !channel.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(ApiError::BadRequest("invalid channel name".into()));
     }
-    let mut options = PlayOptions::default();
-    if let Some(pt) = req.player_type {
-        if !PLAYER_TYPES.contains(&pt.as_str()) {
+    let mut options = match req.player_type {
+        Some(pt) if !PLAYER_TYPES.contains(&pt.as_str()) => {
             return Err(ApiError::BadRequest(format!("unknown player type '{pt}'")));
         }
-        options.player_type = pt;
+        Some(pt) => PlayOptions::new(&pt),
+        None => PlayOptions::default(),
+    };
+    if req.backup == Some(false) {
+        options.backups.clear();
     }
-    options.backup = req.backup.unwrap_or(true);
     options.simulate_ads = req.simulate_ads.unwrap_or(false);
     let id = s.player.start(channel, options).await?;
     Ok(Json(json!({ "id": id, "hls_url": format!("/hls/{id}/master.m3u8") })))
