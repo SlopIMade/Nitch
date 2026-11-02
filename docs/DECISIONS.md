@@ -139,3 +139,18 @@ its pipeline.
 - equal width and height in cells is exactly 16:9
 
 Refines D13: free placement now means grid-aligned placement, and "own presets" become sessions.
+
+### D18 — Tiles are `fallbacksrc`; live sources pace the output; formats are pinned
+*2026-11-02*
+
+From S3/S4:
+- Each tile is a `fallbacksrc` (live, clock-timestamped, slate on failure, automatic retry).
+- A tiny live background (video) and live silence (audio) pace the compositor and mixers, so no
+  tile can hold up the output.
+- I420 before the encoder and H.264 High after it are set explicitly.
+
+Measured: all runtime changes work at 0.98× realtime, for ~1.85 cores per 2×2 session in software.
+**Rejected:**
+- Data-paced pipeline (S3): one preroll froze the whole output.
+- Our own re-timestamping: `fallbacksrc` already does it, plus fallback and retry.
+- A full-size background: ~1.4 cores of blending for nothing.

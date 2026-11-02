@@ -124,27 +124,38 @@ Each tile uses the **same ad-handled proxy playlist** as single view, consumed i
 tile the server picks the rendition just above the tile size, e.g. 480p or 720p for a 2×2 tile. That
 saves both decoding and bandwidth.
 
-One GStreamer pipeline per multiview session:
+One GStreamer pipeline per running multiview session. This is the structure proven in spike S4:
 
 ```
 per tile N:
-  hlsdemux2 (internal proxy URL) ─► decodebin3 ─┬─► video ─► videoconvertscale ─► fallbackswitch ─► compositor.sink_N
-                                                │                                       ▲
-                                                │                         slate: loading / offline / ad break
-                                                │
-                                                └─► audio ─► audioconvert ─► fallbackswitch (silence) ─► AAC ─► audio rendition N
+  fallbacksrc (uri = internal ad-handled playlist, fallback-uri = slate) ─┬─► video ─► compositor.sink_N
+                                                                         │       (grid rect, keep-aspect-ratio)
+                                                                         └─► audio ─► convert/resample ─► AAC ─► audio rendition N
+
+pacing (live, so the clock - never a tile - drives the output):
+  videotestsrc is-live, 16×16 black, zorder 0 ─► compositor
+  audiotestsrc is-live, silence               ─► every audio rendition (fallback)
 
 output:
-  compositor ─► H.264 encoder (VA-API or x264) ─► hlscmafsink   (video)
-  audio rendition 1..N                        ─► hlscmafsink    (one per tile)
+  compositor ─► I420 1920×1080@30 ─► H.264 encoder (VA-API or x264) ─► profile=high ─► hlscmafsink (video)
+  audio rendition 1..N                                                             ─► hlscmafsink (one per tile)
   server writes master.m3u8: 1 video + N audio renditions (EXT-X-MEDIA TYPE=AUDIO)
 ```
 
 - **Layout change:** set the compositor pad properties (`xpos`, `ypos`, `width`, `height`, `zorder`)
   while the pipeline runs. No restart.
-- **Add, replace or remove a tile:** link or unlink a tile bin through dynamic pads while running.
-- **Stalls** (ad break without backup, streamer offline, network trouble): `fallbackswitch` shows that
-  tile's slate. The other tiles are not affected.
+- **Add, replace or remove a tile:**
+  1. set the old `fallbacksrc` and its audio chain to `NULL` and remove them
+  2. release their pads
+  3. add the new ones and call `sync_state_with_parent`
+
+  The other tiles don't notice (S4).
+- **Stalls and failures** (streamer offline, network trouble, source can't start): `fallbacksrc`
+  shows that tile's slate and keeps retrying. The other tiles are not affected. Its `status`
+  (`buffering` / `running` / `retrying`) feeds the `tile_state` events.
+- **Pinned formats:** the raw format before the encoder (I420, 8 bit) and the H.264 profile after it are
+  always set explicitly. Left to negotiation, S4 ended up with High 4:4:4 10-bit: 3× the CPU and
+  unplayable in browsers. The output profile is checked in tests.
 - **Clock-paced, not data-paced:** S3 showed that without this, one stalled input (e.g. a preroll)
   holds up the whole output. Therefore:
   - every tile is re-timestamped onto the pipeline clock when it starts or restarts
