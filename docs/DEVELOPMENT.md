@@ -37,30 +37,24 @@ build output goes into WSL (see below).
 
 ## 2. Inside WSL (Ubuntu)
 
-```bash
-sudo apt update && sudo apt install -y \
-  build-essential pkg-config git curl libssl-dev sqlite3 \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev \
-  gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-  gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
-  vainfo mesa-va-drivers \
-  docker.io docker-compose-v2
-sudo usermod -aG docker "$USER"
-```
+Open an Ubuntu terminal and run the setup script ([scripts/setup-wsl.sh](../scripts/setup-wsl.sh)).
+It asks for your sudo password and is safe to run again. It does the following:
 
-Rust:
+- installs the build tools, the GStreamer dev libraries and plugins, VA-API tools, Docker Engine and Compose
+- adds you to the `docker` group
+- installs Rust via rustup
+- sets `CARGO_TARGET_DIR` in `~/.profile`, so build output stays on the fast Linux disk instead of `/mnt/<drive>`
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+bash <repo>/scripts/setup-wsl.sh
 ```
 
-Keep build output on the fast Linux disk instead of `/mnt/<drive>`:
+Then run `wsl --shutdown` in Windows and reopen WSL, so the docker group and `PATH` take effect.
+Verify with the check script, which changes nothing:
 
 ```bash
-echo 'export CARGO_TARGET_DIR="$HOME/.cache/nitch-target"' >> ~/.bashrc
+bash <repo>/scripts/check-dev.sh
 ```
-
-Then close and reopen the WSL terminal so the docker group and `PATH` take effect.
 
 ## 3. Windows side
 
