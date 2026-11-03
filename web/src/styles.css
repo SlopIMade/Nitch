@@ -854,3 +854,42 @@ html.tv .chat__header {
   background: var(--accent);
   font-size: 12px;
 }
+
+/* ---------- settings ---------- */
+
+.settings {
+  max-width: 820px;
+}
+
+.settings__section {
+  margin-bottom: 28px;
+}
+
+.settings__section h3 {
+  margin: 0 0 10px;
+  color: var(--accent-2);
+}
+
+.settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--surface-2);
+}
+
+.settings__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 20px;
+  margin: 0;
+}
+
+.settings__facts dt {
+  color: var(--muted);
+}
+
+.settings__facts dd {
+  margin: 0;
+}

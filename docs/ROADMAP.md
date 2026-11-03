@@ -155,11 +155,15 @@ move, resize and zoom the chat. ✓
 
 ## M7 — Polish & operations
 
-- Settings screen: quality, ad strategy order, output resolution, access PIN
-- Diagnostics screen
-- Install guide and example compose file
+- [x] Settings screen: quality limit and chat reset (per device), "Change server" in the TV app
+- [x] Diagnostics: `/api/system` and its section on the Settings screen (encoder, running multiviews
+  with tile states, streams being read, chats joined)
+- [x] Install guide (`docs/INSTALL.md`) and compose file
+- [x] CI: GitHub Actions builds and tests server and web app, and builds the image
+- [ ] Ad strategy order and output resolution as settings (today: defaults in code / environment)
+- [ ] Access PIN for the home network (today: any device on the LAN can use the server)
+- [ ] Slimmer image (1.03 GB, mostly GStreamer plugins)
 - [x] GitHub repository: private, `SlopIMade/Nitch` (D21)
-- CI: build, tests, image (GitHub Actions)
 
 ## M8 — Deployment on the target VM
 

@@ -272,6 +272,20 @@ impl Manager {
         Some(MultiviewInfo { hls_url: format!("/hls/mv/{id}/master.m3u8"), grid: GRID, slots })
     }
 
+    /// For diagnostics: encoder, limit, and the running sessions with their tiles.
+    pub fn diagnostics(&self) -> serde_json::Value {
+        let ids: Vec<String> = self.running.lock().unwrap().keys().cloned().collect();
+        let running: Vec<serde_json::Value> = ids
+            .iter()
+            .filter_map(|id| {
+                let info = self.info(id)?;
+                let idle = self.running.lock().unwrap().get(id).map(|r| r.last_access.elapsed().as_secs());
+                Some(serde_json::json!({ "id": id, "idle_seconds": idle, "slots": info.slots.into_iter().flatten().collect::<Vec<_>>() }))
+            })
+            .collect();
+        serde_json::json!({ "encoder": format!("{:?}", self.encoder), "max_running": self.max_running, "running": running })
+    }
+
     /// Marks a session as watched (called for every playlist request).
     pub fn touch(&self, id: &str) {
         if let Some(r) = self.running.lock().unwrap().get_mut(id) {

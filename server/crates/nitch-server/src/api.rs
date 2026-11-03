@@ -25,6 +25,7 @@ pub struct AppState {
     pub multiview: Arc<multiview::Manager>,
     pub store: Arc<Store>,
     pub tw: nitch_twitch::Twitch,
+    pub started: std::time::Instant,
 }
 
 type St = State<Arc<AppState>>;
@@ -32,6 +33,7 @@ type St = State<Arc<AppState>>;
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/system", get(system))
         .route("/api/ws", get(websocket))
         .route("/api/auth", get(auth_status).delete(logout))
         .route("/api/auth/device", post(start_login))
@@ -140,6 +142,17 @@ struct ChannelInfo {
 
 async fn health() -> Json<serde_json::Value> {
     Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+/// Diagnostics for the settings screen.
+async fn system(State(s): St) -> Json<serde_json::Value> {
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_seconds": s.started.elapsed().as_secs(),
+        "multiview": s.multiview.diagnostics(),
+        "play_sessions": s.player.diagnostics(),
+        "chat_channels": s.chat.channels(),
+    }))
 }
 
 async fn auth_status(State(s): St) -> Json<AuthStatus> {

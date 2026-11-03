@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
 import { SessionEditorPage } from "./pages/SessionEditor";
 import { SessionsPage } from "./pages/Sessions";
+import { SettingsPage } from "./pages/Settings";
 import { usePlayer } from "./player/PlayerContext";
 import { PlayerLayer } from "./player/PlayerLayer";
 import { installBackHandler } from "./tv";
@@ -30,9 +31,8 @@ function Header() {
           Home
         </NavLink>
         <NavLink to="/search">Search</NavLink>
-        <NavLink to="/multiview" end>
-          Multiview
-        </NavLink>
+        <NavLink to="/multiview">Multiview</NavLink>
+        <NavLink to="/settings">Settings</NavLink>
       </nav>
       <div className="header__user">
         {auth.data?.state === "logged_in" ? (
@@ -86,6 +86,7 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/multiview" element={<SessionsPage />} />
           <Route path="/multiview/:id" element={<SessionEditorPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<HomePage />} />
         </Routes>
       </main>

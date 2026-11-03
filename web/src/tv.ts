@@ -8,7 +8,7 @@
 /** The Android TV shell sets this in its user agent and exposes `window.NitchTV`. */
 export const isTv = /NitchTV/.test(navigator.userAgent);
 
-type NitchTvBridge = { exit: () => void; setKeepScreenOn: (on: boolean) => void };
+type NitchTvBridge = { exit: () => void; setKeepScreenOn: (on: boolean) => void; changeServer?: () => void };
 declare global {
   interface Window {
     NitchTV?: NitchTvBridge;

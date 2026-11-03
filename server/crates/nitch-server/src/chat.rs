@@ -109,6 +109,11 @@ impl ChatHub {
         self.messages.subscribe()
     }
 
+    /// Joined channels and how many clients want each (diagnostics).
+    pub fn channels(&self) -> HashMap<String, usize> {
+        self.counts.lock().unwrap().clone()
+    }
+
     /// A client wants `channel`'s chat; joins it if it's the first.
     pub fn subscribe(&self, channel: &str) {
         let channel = channel.to_lowercase();

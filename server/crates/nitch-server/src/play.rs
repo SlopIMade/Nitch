@@ -196,6 +196,24 @@ impl Player {
             .map(|(i, _)| *i)
     }
 
+    /// For diagnostics: active play sessions (channel, ad status).
+    pub fn diagnostics(&self) -> Vec<serde_json::Value> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, s)| {
+                serde_json::json!({
+                    "id": id,
+                    "channel": s.channel,
+                    "idle_seconds": s.last_access.elapsed().as_secs(),
+                    "slates": s.options.slates,
+                    "ad": s.status.ad,
+                })
+            })
+            .collect()
+    }
+
     /// Ends a play session (e.g. a multiview tile that was removed).
     pub fn remove(&self, id: &str) {
         self.sessions.lock().unwrap().remove(id);

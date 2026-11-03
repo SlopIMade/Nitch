@@ -55,6 +55,7 @@ async fn server() -> Result<()> {
         player,
         multiview: multiview.clone(),
         tw,
+        started: std::time::Instant::now(),
     });
 
     // Housekeeping for multiview: stop idle pipelines; retry offline tiles every minute.

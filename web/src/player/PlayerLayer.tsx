@@ -8,6 +8,7 @@ import Hls, { type Level } from "hls.js";
 import { api, ApiError, GRID, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
 import { claimArrows, focusWithin } from "../tv";
 import { ChatOverlay } from "./ChatOverlay";
+import { QUALITY_KEY } from "../pages/Settings";
 import { usePlayer, type Target } from "./PlayerContext";
 
 type Quality = { index: number; label: string };
@@ -153,6 +154,12 @@ export function PlayerLayer() {
           const hls = new Hls({ liveSyncDurationCount: 3, lowLatencyMode: false });
           hlsRef.current = hls;
           hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+            // This device's quality limit (Settings): cap automatic switching at that height.
+            const limit = Number(localStorage.getItem(QUALITY_KEY));
+            if (limit && target.kind === "channel") {
+              const allowed = data.levels.map((l, i) => ({ h: l.height, i })).filter((l) => l.h > 0 && l.h <= limit);
+              if (allowed.length) hls.autoLevelCapping = allowed.reduce((a, b) => (b.h > a.h ? b : a)).i;
+            }
             setQualities(
               data.levels
                 .map((l, index) => ({ index, label: levelLabel(l), height: l.height }))
