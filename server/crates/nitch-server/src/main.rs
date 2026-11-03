@@ -56,6 +56,7 @@ async fn server() -> Result<()> {
         multiview: multiview.clone(),
         tw,
         started: std::time::Instant::now(),
+        events: tokio::sync::broadcast::channel(64).0,
     });
 
     // Housekeeping for multiview: stop idle pipelines; retry offline tiles every minute.

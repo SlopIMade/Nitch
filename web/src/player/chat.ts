@@ -14,6 +14,9 @@ export type ChatMessage = {
 };
 
 type Listener = (m: ChatMessage) => void;
+/** Other server events on the same socket, e.g. `{type: "session_updated", id}`. */
+export type ServerEvent = { type: string; id?: string };
+const eventListeners = new Set<(e: ServerEvent) => void>();
 
 let socket: WebSocket | null = null;
 let wanted: string[] = [];
@@ -34,10 +37,11 @@ function connect() {
   socket.onmessage = (e) => {
     const data = JSON.parse(e.data);
     if (data.type === "chat") listeners.forEach((l) => l(data as ChatMessage));
+    else eventListeners.forEach((l) => l(data as ServerEvent));
   };
   socket.onclose = () => {
     socket = null;
-    if (listeners.size > 0) setTimeout(connect, (retry = Math.min(retry * 2, 30_000)));
+    if (listeners.size > 0 || eventListeners.size > 0) setTimeout(connect, (retry = Math.min(retry * 2, 30_000)));
   };
 }
 
@@ -71,4 +75,13 @@ export function parts(m: ChatMessage): ({ text: string } | { emote: string; name
   }
   if (pos < chars.length) out.push({ text: chars.slice(pos).join("") });
   return out;
+}
+
+/** Listens for server events (the socket stays open while anyone listens). */
+export function watchEvents(onEvent: (e: ServerEvent) => void): () => void {
+  eventListeners.add(onEvent);
+  if (!socket) connect();
+  return () => {
+    eventListeners.delete(onEvent);
+  };
 }

@@ -101,7 +101,7 @@ playback resumes on its own. ✓ (with simulated ads)
 - [x] Grid editor: templates as a starting point, add streams, drag/resize with snapping (16:9 lock,
   Shift for free), keyboard editing, selected tile's actions in the toolbar
 - [x] Docker image with GStreamer (x264, libav, VA drivers)
-- [ ] `session_updated` events, so all devices watching a session follow edits (with the WebSocket, M6)
+- [x] `session_updated` events over the WebSocket, so all devices showing a session follow edits
 - [ ] Layout-change markers in the playlist, so overlays switch exactly with the video (today they switch a few
   seconds early)
 - [ ] "Cover" fit (crop to fill); seamless rendition upgrade when a tile grows a lot

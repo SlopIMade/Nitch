@@ -11,6 +11,7 @@ import { SettingsPage } from "./pages/Settings";
 import { usePlayer } from "./player/PlayerContext";
 import { PlayerLayer } from "./player/PlayerLayer";
 import { installBackHandler } from "./tv";
+import { watchEvents } from "./player/chat";
 
 function Header() {
   const qc = useQueryClient();
@@ -74,10 +75,28 @@ function BackKey() {
   return null;
 }
 
+/** Server events: when any device edits a session, every device showing it follows. */
+function ServerEvents() {
+  const qc = useQueryClient();
+  useEffect(
+    () =>
+      watchEvents((e) => {
+        if (e.type === "session_updated") {
+          qc.invalidateQueries({ queryKey: ["sessions"] });
+          qc.invalidateQueries({ queryKey: ["session", e.id] });
+          qc.invalidateQueries({ queryKey: ["multiview", e.id] });
+        }
+      }),
+    [qc],
+  );
+  return null;
+}
+
 export function App() {
   return (
     <>
       <BackKey />
+      <ServerEvents />
       <Header />
       <main>
         <Routes>

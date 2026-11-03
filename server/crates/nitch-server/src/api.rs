@@ -26,6 +26,14 @@ pub struct AppState {
     pub store: Arc<Store>,
     pub tw: nitch_twitch::Twitch,
     pub started: std::time::Instant,
+    /// Events for every WebSocket client (e.g. `session_updated`), as JSON.
+    pub events: tokio::sync::broadcast::Sender<String>,
+}
+
+impl AppState {
+    fn event(&self, value: serde_json::Value) {
+        let _ = self.events.send(value.to_string());
+    }
 }
 
 type St = State<Arc<AppState>>;
@@ -290,6 +298,7 @@ async fn create_session(State(s): St, Json(input): Json<SessionInput>) -> Result
     let session = Session { id: s.player.new_id(), name, tiles, created_at: now, updated_at: now };
     s.store.save_session(&session)?;
     tracing::info!(id = %session.id, name = %session.name, tiles = session.tiles.len(), "session created");
+    s.event(json!({ "type": "session_updated", "id": session.id }));
     Ok((StatusCode::CREATED, Json(session)).into_response())
 }
 
@@ -303,8 +312,9 @@ async fn update_session(State(s): St, Path(id): Path<String>, Json(input): Json<
     }
     session.updated_at = nitch_twitch::auth::now_unix();
     s.store.save_session(&session)?;
-    // A running pipeline follows the edit live.
+    // A running pipeline follows the edit live, and so do other devices showing the session.
     s.multiview.apply(&session).await?;
+    s.event(json!({ "type": "session_updated", "id": session.id }));
     Ok(Json(session))
 }
 
@@ -312,6 +322,7 @@ async fn delete_session(State(s): St, Path(id): Path<String>) -> Result<StatusCo
     s.multiview.stop(&id);
     if s.store.delete_session(&id)? {
         tracing::info!(%id, "session deleted");
+        s.event(json!({ "type": "session_updated", "id": id }));
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::NotFound("no such session".into()))
@@ -386,6 +397,7 @@ async fn websocket_client(socket: axum::extract::ws::WebSocket, s: Arc<AppState>
 
     let (mut tx, mut rx) = socket.split();
     let mut messages = s.chat.messages();
+    let mut events = s.events.subscribe();
     let mut subscribed: HashSet<String> = HashSet::new();
     loop {
         tokio::select! {
@@ -414,6 +426,15 @@ async fn websocket_client(socket: axum::extract::ws::WebSocket, s: Arc<AppState>
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 _ => {}
+            },
+            event = events.recv() => match event {
+                Ok(json) => {
+                    if tx.send(Message::text(json)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(_) => {}
             },
         }
     }
