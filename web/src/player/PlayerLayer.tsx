@@ -32,6 +32,17 @@ function levelLabel(l: Level): string {
   return l.height ? `${l.height}p${fps}` : "audio";
 }
 
+/**
+ * Takes the focus out of the player's control bars (not the layout bar), so the arrows belong to
+ * the picture again. Returns whether it was there.
+ */
+export function leaveControls(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el?.closest(".player__bar:not(.player__bar--edit)")) return false;
+  el.blur();
+  return true;
+}
+
 function targetKey(t: Target | null): string | null {
   return t ? (t.kind === "channel" ? `c:${t.channel}` : `s:${t.id}`) : null;
 }
@@ -359,7 +370,11 @@ export function PlayerLayer() {
   const poke = useCallback(() => {
     setControls(true);
     clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => setControls(false), 3500);
+    hideTimer.current = window.setTimeout(() => {
+      setControls(false);
+      // The controls fade out: so does their focus, and the arrows switch tiles again.
+      leaveControls();
+    }, 3500);
   }, []);
   useEffect(() => {
     if (!target) return;
@@ -410,10 +425,22 @@ export function PlayerLayer() {
     const onUp = (e: KeyboardEvent) => {
       if (!inControls() && pressKind(e, "ArrowLeft") === "short") step(-1);
     };
+    // Past the edge of the controls (down from the bottom bar, up from the top bar): back to the
+    // picture, where ← → switch the tile again. Before the focus navigation, which would
+    // otherwise move between the bars first.
+    const onEdge = (e: KeyboardEvent) => {
+      const bar = (document.activeElement as HTMLElement | null)?.closest(".player__bar");
+      if ((e.key === "ArrowDown" && bar?.matches(".player__bar--bottom")) || (e.key === "ArrowUp" && bar?.matches(".player__bar--top"))) {
+        e.preventDefault();
+        leaveControls();
+      }
+    };
+    window.addEventListener("keydown", onEdge, true);
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
       release();
+      window.removeEventListener("keydown", onEdge, true);
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
@@ -538,7 +565,9 @@ export function PlayerLayer() {
               ))}
             </select>
           )}
-          <span className="player__keys">{sessionId ? "← → switch tile · hold ← menu" : "hold ← menu"}</span>
+          <span className="player__keys">
+            {sessionId ? "← → switch tile · hold ← menu · Back or ↓ leaves the bar" : "hold ← menu · Back or ↓ leaves the bar"}
+          </span>
         </div>
       )}
 

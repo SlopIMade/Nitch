@@ -8,7 +8,7 @@ import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
 import { SettingsPage } from "./pages/Settings";
 import { usePlayer } from "./player/PlayerContext";
-import { PlayerLayer } from "./player/PlayerLayer";
+import { leaveControls, PlayerLayer } from "./player/PlayerLayer";
 import { installBackHandler } from "./tv";
 import { watchEvents } from "./player/chat";
 
@@ -72,6 +72,8 @@ function BackKey() {
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
           return true;
         }
+        // In the player: Back first leaves the control bar, then ends playback.
+        if (current.current.target && leaveControls()) return true;
         if (current.current.target) {
           current.current.stop();
           return true;
