@@ -76,6 +76,10 @@ pub struct Timeline {
     nominal: f64,
     /// Per rendition: segment time → URI.
     sources: HashMap<usize, BTreeMap<i64, Source>>,
+    /// Fill unfillable ad time with slates (browser player, D15). Without slates the playlist
+    /// pauses and continues with the next live segment (multiview tiles: fallbacksrc retimes
+    /// a stalled input, and slate timestamps confused the tile's timeline).
+    slates: bool,
 }
 
 fn ms(seconds: f64) -> i64 {
@@ -90,7 +94,11 @@ impl Default for Timeline {
 
 impl Timeline {
     pub fn new() -> Self {
-        Self { entries: VecDeque::new(), next_seq: 0, pruned_disc: 0, nominal: 2.0, sources: HashMap::new() }
+        Self::with_slates(true)
+    }
+
+    pub fn with_slates(slates: bool) -> Self {
+        Self { entries: VecDeque::new(), next_seq: 0, pruned_disc: 0, nominal: 2.0, sources: HashMap::new(), slates }
     }
 
     /// Takes a fresh primary playlist of `rendition` (and, during ads, the backups' in priority
@@ -142,6 +150,12 @@ impl Timeline {
                     self.push(pdt, c.duration, c.origin, c.genuine_disc);
                     end = pdt + ms(c.duration);
                 }
+                // Without slates: skip the gap and continue with the next live segment.
+                Some((&pdt, c)) if !self.slates => {
+                    self.push(pdt, c.duration, c.origin, c.genuine_disc);
+                    end = pdt + ms(c.duration);
+                }
+                None if !self.slates => break,
                 // No live content at `end`. A slate fills it once that's certain: either live
                 // content resumes later, or the primary has moved on long enough for the backup.
                 _ => {
@@ -177,6 +191,11 @@ impl Timeline {
                 *s = s.split_off(&(first - TOLERANCE_MS));
             }
         }
+    }
+
+    /// Stream time up to which the timeline is filled.
+    pub fn end(&self) -> Option<i64> {
+        self.entries.back().map(|e| e.start + ms(e.duration))
     }
 
     /// Origin of the newest entry.

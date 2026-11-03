@@ -168,6 +168,9 @@ impl Multiview {
         let out_caps = gst::ElementFactory::make("capsfilter")
             .property("caps", raw(cfg.width, cfg.height).field("format", "I420").build())
             .build()?;
+        // Strictly increasing timestamps at a constant rate: x264 aborts on a frame whose time
+        // goes backwards, which a joining tile (latency recalculation) could otherwise cause.
+        let rate = make("videorate")?;
         let conv = make("videoconvert")?;
         // ... and every remaining field is fixed after the converter: the CMAF muxer refuses any
         // caps change mid-stream, and a joining tile could otherwise change colorimetry.
@@ -201,12 +204,12 @@ impl Multiview {
             .build()?;
         let parse = make("h264parse")?;
         let vsink = cmaf_sink(&cfg.dir.join("video"))?;
-        pipeline.add_many([&bg, &bg_caps, &comp, &out_caps, &conv, &enc_caps, &vq, &enc, &h264_caps, &parse, &vsink])?;
+        pipeline.add_many([&bg, &bg_caps, &comp, &out_caps, &rate, &conv, &enc_caps, &vq, &enc, &h264_caps, &parse, &vsink])?;
         gst::Element::link_many([&bg, &bg_caps])?;
         let bg_pad = comp.request_pad_simple("sink_%u").context("compositor pad")?;
         bg_pad.set_property("zorder", 0u32);
         bg_caps.static_pad("src").unwrap().link(&bg_pad)?;
-        gst::Element::link_many([&comp, &out_caps, &conv, &enc_caps, &vq, &enc, &h264_caps, &parse, &vsink])?;
+        gst::Element::link_many([&comp, &out_caps, &rate, &conv, &enc_caps, &vq, &enc, &h264_caps, &parse, &vsink])?;
 
         // ---- audio, one rendition per slot ----
         let mut slots = Vec::new();

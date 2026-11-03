@@ -208,6 +208,21 @@ fn every_ad_segment_becomes_exactly_one_slate() {
 }
 
 #[test]
+fn without_slates_the_gap_is_skipped() {
+    let mut tl = Timeline::with_slates(false);
+    for text in EMBED {
+        tl.update(0, &parse(text), &[]);
+        let out = tl.render(0, &SLATES);
+        assert!(!out.contains("slate") && !out.contains("Amazon"));
+        assert!(!out.contains("#EXT-X-DISCONTINUITY
+"), "live to live needs no discontinuity");
+    }
+    // The break (~60 s) is simply missing from the timeline, which ends live again.
+    assert_eq!(tl.last_origin(), Some(Origin::Primary));
+    assert!(tl.origins_since(0).get(&Origin::Slate).is_none());
+}
+
+#[test]
 fn simulated_ads_mark_live_segments() {
     let mut pl = parse(EMBED[0]);
     assert!(!pl.has_ads());

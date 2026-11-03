@@ -13,7 +13,7 @@ use anyhow::{Result, bail};
 use nitch_media::{Config, Encoder, Multiview, TileSpec};
 use serde::Serialize;
 
-use crate::play::{PlayOptions, Player};
+use crate::play::{FilledBy, PlayOptions, Player};
 use crate::sessions::{Fit, GRID, MAX_TILES, Session, Tile};
 
 pub const WIDTH: i32 = 1920;
@@ -33,7 +33,7 @@ pub struct SlotInfo {
     pub w: u32,
     pub h: u32,
     pub z: u32,
-    /// `loading` | `live` | `retrying` | `offline`
+    /// `loading` | `live` | `ad` (no ad-free source right now) | `retrying` | `offline`
     pub state: String,
 }
 
@@ -50,6 +50,9 @@ struct SlotTile {
     tile: Tile,
     /// Internal play session; `None` while the channel is offline.
     play_id: Option<String>,
+    /// The tile's source URI (play session + rendition). Kept when the tile only moves or is
+    /// resized: a new rendition would restart the source and leave the tile black for ~15 s.
+    uri: Option<String>,
 }
 
 struct Running {
@@ -122,6 +125,12 @@ impl Manager {
 
     /// Starts the session's pipeline (or joins the running one) and waits for its first segments.
     pub async fn play(&self, session: &Session) -> Result<MultiviewInfo> {
+        // A pipeline that failed is started fresh rather than joined.
+        let failed = self.running.lock().unwrap().get(&session.id).and_then(|r| r.mv.failure());
+        if let Some(reason) = failed {
+            tracing::warn!(id = %session.id, %reason, "restarting failed multiview");
+            self.stop(&session.id);
+        }
         let starting = {
             let mut running = self.running.lock().unwrap();
             if !running.contains_key(&session.id) {
@@ -178,7 +187,10 @@ impl Manager {
         let mut new_plays = HashMap::new();
         for (k, tile, same) in &plan {
             if let (Some(t), false) = (tile, same) {
-                match self.player.start(&t.channel, PlayOptions::default()).await {
+                // No slates in tiles: the slate's restarting timestamps left a tile black after
+                // the break; a paused playlist is bridged by fallbacksrc instead.
+                let options = PlayOptions { slates: false, ..PlayOptions::default() };
+                match self.player.start(&t.channel, options).await {
                     Ok(id) => {
                         new_plays.insert(*k, id);
                     }
@@ -200,27 +212,23 @@ impl Manager {
                     }
                     continue;
                 };
-                let play_id = if same {
-                    old.and_then(|o| o.play_id)
+                let (play_id, kept_uri) = if same {
+                    old.map_or((None, None), |o| (o.play_id, o.uri))
                 } else {
                     removed.extend(old.and_then(|o| o.play_id));
-                    new_plays.remove(&k)
+                    (new_plays.remove(&k), None)
                 };
-                let spec = play_id.as_ref().and_then(|id| {
-                    let (x, y, w, h) = pixels(&tile);
+                let (x, y, w, h) = pixels(&tile);
+                // A new tile gets the rendition just above its size; a moved or resized one keeps
+                // its source, so the picture isn't interrupted.
+                let uri = kept_uri.or_else(|| {
+                    let id = play_id.as_ref()?;
                     let rendition = self.player.pick_rendition(id, h as u32)?;
-                    Some(TileSpec {
-                        uri: format!("{}/hls/{id}/v{rendition}.m3u8", self.base),
-                        x,
-                        y,
-                        w,
-                        h,
-                        z: tile.z,
-                        cover: tile.fit == Fit::Cover,
-                    })
+                    Some(format!("{}/hls/{id}/v{rendition}.m3u8", self.base))
                 });
+                let spec = uri.clone().map(|uri| TileSpec { uri, x, y, w, h, z: tile.z, cover: tile.fit == Fit::Cover });
                 r.mv.set_tile(k, spec.as_ref())?;
-                r.slots[k] = Some(SlotTile { tile, play_id });
+                r.slots[k] = Some(SlotTile { tile, play_id, uri });
             }
         }
         for id in removed {
@@ -245,11 +253,16 @@ impl Manager {
                     w: st.tile.w,
                     h: st.tile.h,
                     z: st.tile.z,
-                    state: match (st.play_id.is_some(), state.as_deref()) {
-                        (false, _) => "offline".into(),
-                        (true, Some("running")) => "live".into(),
-                        (true, Some("retrying")) => "retrying".into(),
-                        _ => "loading".into(),
+                    state: {
+                        let unfilled_ad = st.play_id.as_deref().and_then(|id| self.player.status(id)).and_then(|p| p.ad)
+                            .is_some_and(|ad| ad.filled_by == FilledBy::Nothing);
+                        match (st.play_id.is_some(), state.as_deref()) {
+                            (false, _) => "offline".into(),
+                            _ if unfilled_ad => "ad".into(),
+                            (true, Some("running")) => "live".into(),
+                            (true, Some("retrying")) => "retrying".into(),
+                            _ => "loading".into(),
+                        }
                     },
                 })
             })
@@ -324,7 +337,7 @@ mod tests {
     }
 
     fn slot(channel: &str) -> Option<SlotTile> {
-        Some(SlotTile { tile: tile(channel), play_id: Some("p".into()) })
+        Some(SlotTile { tile: tile(channel), play_id: Some("p".into()), uri: None })
     }
 
     #[test]

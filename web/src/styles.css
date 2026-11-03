@@ -441,3 +441,235 @@ h2 {
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
   font-size: 0.9rem;
 }
+
+/* ---------- player stage: a 16:9 box, so multiview overlays line up with the video ---------- */
+
+.player--full {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.player__stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: min(100%, calc(100vh * 16 / 9));
+  max-height: 100%;
+}
+
+.player--mini .player__stage {
+  width: 100%;
+  height: 100%;
+}
+
+.tiles {
+  position: absolute;
+  inset: 0;
+}
+
+.tile {
+  position: absolute;
+  padding: 0;
+  border: 2px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tile:hover {
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.tile--focus {
+  border-color: var(--accent-2);
+}
+
+.tile__label {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  font-size: 0.85rem;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.tile:hover .tile__label,
+.tile--focus .tile__label,
+.player:hover .tile__label {
+  opacity: 1;
+}
+
+.tile__state {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(14, 14, 18, 0.6);
+}
+
+/* ---------- sessions ---------- */
+
+.section {
+  margin-top: 32px;
+}
+
+.grid--small {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+.card--static {
+  cursor: default;
+}
+
+.card--static:hover {
+  background: var(--surface);
+}
+
+.card__thumb--layout {
+  display: block;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  background: #000;
+}
+
+.layout-preview {
+  position: absolute;
+  inset: 0;
+}
+
+.layout-preview__tile {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  background: rgba(145, 71, 255, 0.18);
+  color: var(--text);
+  font-size: 0.75rem;
+  padding: 2px 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row--left {
+  justify-content: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.row--spread {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.row-spacer {
+  flex: 1;
+}
+
+/* ---------- grid editor ---------- */
+
+.editor__canvas {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: min(100%, calc((100vh - 220px) * 16 / 9));
+  margin: 16px 0;
+  background-color: #000;
+  /* The 60 × 60 grid: a line every 1/60 of the width and height, a stronger one every 10 cells. */
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size:
+    calc(100% / 6) calc(100% / 6),
+    calc(100% / 6) calc(100% / 6),
+    calc(100% / 60) calc(100% / 60),
+    calc(100% / 60) calc(100% / 60);
+  user-select: none;
+  touch-action: none;
+}
+
+.editor__tile {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  background: rgba(145, 71, 255, 0.22);
+  cursor: move;
+}
+
+.editor__tile--selected {
+  border-color: #fff;
+  background: rgba(145, 71, 255, 0.35);
+}
+
+.editor__tile--empty {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.editor__channel {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.editor__size {
+  position: absolute;
+  right: 22px;
+  bottom: 4px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.editor__selection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.editor__handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(135deg, transparent 50%, #fff 50%);
+  cursor: nwse-resize;
+}
+
+/* ---------- modal ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.modal__box {
+  width: min(620px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+  padding: 20px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}

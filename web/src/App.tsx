@@ -4,6 +4,8 @@ import { api } from "./api";
 import { HomePage } from "./pages/Home";
 import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
+import { SessionEditorPage } from "./pages/SessionEditor";
+import { SessionsPage } from "./pages/Sessions";
 import { PlayerLayer } from "./player/PlayerLayer";
 
 function Header() {
@@ -25,6 +27,9 @@ function Header() {
           Home
         </NavLink>
         <NavLink to="/search">Search</NavLink>
+        <NavLink to="/multiview" end>
+          Multiview
+        </NavLink>
       </nav>
       <div className="header__user">
         {auth.data?.state === "logged_in" ? (
@@ -54,6 +59,8 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/multiview" element={<SessionsPage />} />
+          <Route path="/multiview/:id" element={<SessionEditorPage />} />
           <Route path="*" element={<HomePage />} />
         </Routes>
       </main>

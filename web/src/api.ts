@@ -38,10 +38,21 @@ export type ChannelInfo = {
   live: LiveStream | null;
 };
 
+/** Cells per side of the multiview canvas (D17). Equal w and h is exactly 16:9. */
+export const GRID = 60;
+
+export type Tile = { channel: string; x: number; y: number; w: number; h: number; z: number; fit?: "contain" | "cover" };
+export type Rect = { x: number; y: number; w: number; h: number };
+export type Session = { id: string; name: string; tiles: Tile[]; created_at: number; updated_at: number };
+export type Template = { key: string; name: string; rects: Rect[] };
+export type SlotInfo = Tile & { state: "live" | "loading" | "ad" | "retrying" | "offline" };
+/** Audio rendition `k` of the multiview stream belongs to `slots[k]`. */
+export type MultiviewInfo = { hls_url: string; grid: number; slots: (SlotInfo | null)[] };
+
 export type PlayStatus = {
   channel: string;
   /** Set while an ad break is in the playlist; `from`/`until` are stream time (Unix ms). */
-  ad: { from: number; until: number | null; filled_by: "backup" | "slate" } | null;
+  ad: { from: number; until: number | null; filled_by: "backup" | "slate" | "nothing" } | null;
 };
 
 /** Testing ad handling: `localStorage["nitch.debug.play"] = '{"simulate_ads":true,"backup":false}'`. */
@@ -91,6 +102,20 @@ export const api = {
       body: JSON.stringify({ ...debugPlayOptions(), channel }),
     }),
   playStatus: (id: string) => request<PlayStatus>(`/api/play/${encodeURIComponent(id)}`),
+
+  sessions: () => request<Session[]>("/api/sessions"),
+  session: (id: string) => request<Session>(`/api/sessions/${encodeURIComponent(id)}`),
+  templates: () => request<Template[]>("/api/sessions/templates"),
+  createSession: (name: string, tiles: Tile[]) =>
+    request<Session>("/api/sessions", { method: "POST", body: JSON.stringify({ name, tiles }) }),
+  updateSession: (id: string, patch: { name?: string; tiles?: Tile[] }) =>
+    request<Session>(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteSession: async (id: string) => {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok && res.status !== 404) throw new ApiError(res.status, "error", res.statusText);
+  },
+  playSession: (id: string) => request<MultiviewInfo>(`/api/sessions/${encodeURIComponent(id)}/play`, { method: "POST" }),
+  multiviewStatus: (id: string) => request<MultiviewInfo>(`/api/sessions/${encodeURIComponent(id)}/play`),
 };
 
 export function formatViewers(n: number): string {

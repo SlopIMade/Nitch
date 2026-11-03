@@ -37,12 +37,15 @@ pub struct PlayOptions {
     pub backups: Vec<String>,
     /// Treat 30 s of every 2 minutes as an ad.
     pub simulate_ads: bool,
+    /// Fill ad time nobody can fill with slates (browser player). Multiview tiles turn this
+    /// off: their playlist pauses instead and fallbacksrc bridges the gap.
+    pub slates: bool,
 }
 
 impl PlayOptions {
     pub fn new(player_type: &str) -> Self {
         let backups = BACKUP_PLAYER_TYPES.iter().filter(|p| **p != player_type).map(|p| p.to_string()).collect();
-        Self { player_type: player_type.into(), backups, simulate_ads: false }
+        Self { player_type: player_type.into(), backups, simulate_ads: false, slates: true }
     }
 }
 
@@ -57,6 +60,8 @@ impl Default for PlayOptions {
 pub enum FilledBy {
     Backup,
     Slate,
+    /// No source is ad-free and slates are off: the stream pauses (multiview tiles).
+    Nothing,
 }
 
 /// What clients see about ads (`GET /api/play/{id}`).
@@ -130,6 +135,7 @@ impl Player {
         let id = self.new_id();
         tracing::info!(%channel, %id, ?options, renditions = primary.variants.len(), "play session started");
         let channel = channel.to_lowercase();
+        let slates = options.slates;
         let backups = options
             .backups
             .iter()
@@ -145,7 +151,7 @@ impl Player {
                 options,
                 primary,
                 backups,
-                timeline: Timeline::new(),
+                timeline: Timeline::with_slates(slates),
                 break_from: None,
                 last_access: Instant::now(),
             },
@@ -303,7 +309,11 @@ fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
     let ad = primary.ad_window().map(|(from, until)| AdStatus {
         from,
         until,
-        filled_by: if s.options.backups.is_empty() || s.timeline.recent_slate(3) {
+        filled_by: if !s.options.slates {
+            // Without slates the timeline falls behind the primary while nothing fills the ad.
+            let behind = matches!((s.timeline.end(), primary.edge()), (Some(end), Some(edge)) if edge - end > 4000);
+            if behind || s.options.backups.is_empty() { FilledBy::Nothing } else { FilledBy::Backup }
+        } else if s.options.backups.is_empty() || s.timeline.recent_slate(3) {
             FilledBy::Slate
         } else {
             FilledBy::Backup
