@@ -1,8 +1,9 @@
 // Settings (M7): per-device preferences, the TV app's server, and diagnostics from the server.
-// Like every page, this opens while the player keeps running as the mini player (D14).
+// The chat settings can also be changed while watching, in the player's side menu.
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { resetChat } from "../player/chatSettings";
 
 export const QUALITY_KEY = "nitch.quality";
 
@@ -66,7 +67,7 @@ export function SettingsPage() {
           <button
             className="btn btn--ghost"
             onClick={() => {
-              localStorage.removeItem("nitch.chat");
+              resetChat();
               setChatReset(true);
             }}
           >

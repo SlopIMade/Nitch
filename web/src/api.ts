@@ -102,6 +102,8 @@ export const api = {
       body: JSON.stringify({ ...debugPlayOptions(), channel }),
     }),
   playStatus: (id: string) => request<PlayStatus>(`/api/play/${encodeURIComponent(id)}`),
+  /** The player left this stream; the server ends the play session right away. */
+  stopPlay: (id: string) => fetch(`/api/play/${encodeURIComponent(id)}`, { method: "DELETE", keepalive: true }).catch(() => {}),
 
   sessions: () => request<Session[]>("/api/sessions"),
   session: (id: string) => request<Session>(`/api/sessions/${encodeURIComponent(id)}`),

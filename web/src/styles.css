@@ -8,10 +8,15 @@
   --accent-2: #a970ff;
   --live: #e91916;
   --radius: 8px;
-  --header-h: 56px;
+  --header-h: 3.4rem;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--text);
   background: var(--bg);
+}
+
+/* Everything sized in rem follows the screen: ~13px in a small window, 18px at 1920 wide. */
+html {
+  font-size: clamp(13px, 0.55vw + 8px, 18px);
 }
 
 * {
@@ -187,8 +192,8 @@ h2 {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(min(16rem, 100%), 1fr));
+  gap: 1.1rem;
 }
 
 .card {
@@ -325,27 +330,30 @@ h2 {
   font-weight: 700;
 }
 
-/* ---------- player ---------- */
+/* ---------- player (always full screen) ---------- */
 
 .player {
   position: fixed;
-  z-index: 100;
-  background: #000;
-}
-
-.player--full {
   inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  overflow: hidden;
+  cursor: none;
 }
 
-.player--mini {
-  right: 20px;
-  bottom: 20px;
-  width: 400px;
+.player--controls {
+  cursor: default;
+}
+
+/* A 16:9 box, so multiview overlays line up with the video. */
+.player__stage {
+  position: relative;
   aspect-ratio: 16 / 9;
-  border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
-  cursor: pointer;
+  width: min(100%, calc(100vh * 16 / 9));
+  max-height: 100%;
 }
 
 .player__video {
@@ -360,37 +368,54 @@ h2 {
   display: grid;
   place-items: center;
   color: var(--muted);
+  pointer-events: none;
 }
 
 .player__status--error {
   color: #ff6b6b;
 }
 
+.player__toast {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  color: var(--text);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+
 .player__bar {
   position: absolute;
   left: 0;
   right: 0;
+  z-index: 70;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: 0.6rem;
+  padding: 0.8rem 1rem;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s;
 }
 
-.player:hover .player__bar,
-.player:focus-within .player__bar {
+.player--controls .player__bar,
+.player__bar:focus-within {
   opacity: 1;
 }
 
 .player__bar--top {
   top: 0;
-  background: linear-gradient(rgba(0, 0, 0, 0.75), transparent);
+  background: linear-gradient(rgba(0, 0, 0, 0.7), transparent);
 }
 
 .player__bar--bottom {
   bottom: 0;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  flex-wrap: wrap;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
 }
 
 .player__title {
@@ -400,21 +425,28 @@ h2 {
 
 .player__subtitle {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.player__keys {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .ad-badge {
   position: absolute;
-  top: 70px;
-  right: 18px;
-  padding: 6px 12px;
+  top: 4.2rem;
+  right: 1rem;
+  z-index: 60;
+  padding: 0.35rem 0.75rem;
   border-radius: var(--radius);
   background: rgba(0, 0, 0, 0.65);
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   pointer-events: none;
 }
 
@@ -423,44 +455,7 @@ h2 {
   background: rgba(145, 71, 255, 0.85);
 }
 
-.player--mini .ad-badge {
-  top: 8px;
-  right: 8px;
-  font-size: 0.8rem;
-}
-
-.player__mini-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 4px 4px 10px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
-  font-size: 0.9rem;
-}
-
-/* ---------- player stage: a 16:9 box, so multiview overlays line up with the video ---------- */
-
-.player--full {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.player__stage {
-  position: relative;
-  aspect-ratio: 16 / 9;
-  width: min(100%, calc(100vh * 16 / 9));
-  max-height: 100%;
-}
-
-.player--mini .player__stage {
-  width: 100%;
-  height: 100%;
-}
+/* ---------- multiview tiles ---------- */
 
 .tiles {
   position: absolute;
@@ -475,31 +470,36 @@ h2 {
   color: var(--text);
   font: inherit;
   cursor: pointer;
+  /* Labels and state texts size themselves to the tile. */
+  container-type: size;
 }
 
 .tile:hover {
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .tile--focus {
-  border-color: var(--accent-2);
+  border-color: rgba(169, 112, 255, 0.85);
 }
 
 .tile__label {
   position: absolute;
-  left: 6px;
-  top: 6px;
-  padding: 2px 8px;
+  left: 0.4em;
+  top: 0.4em;
+  max-width: calc(100% - 0.8em);
+  padding: 0.1em 0.5em;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  font-size: 0.85rem;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: clamp(8px, 6cqh, 0.9rem);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s;
 }
 
-.tile:hover .tile__label,
-.tile--focus .tile__label,
-.player:hover .tile__label {
+.player--controls .tile__label,
+.tile:hover .tile__label {
   opacity: 1;
 }
 
@@ -508,8 +508,188 @@ h2 {
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 0.5em;
   color: var(--muted);
   background: rgba(14, 14, 18, 0.6);
+  font-size: clamp(8px, 8cqh, 1rem);
+  text-align: center;
+}
+
+/* ---------- side menu (player) ---------- */
+
+.sidemenu {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 90;
+  width: min(26rem, 90vw);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 18, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
+  cursor: default;
+}
+
+.sidemenu__tabs {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.6rem;
+  border-bottom: 1px solid var(--surface-2);
+}
+
+.sidemenu__tab,
+.sidemenu__close {
+  padding: 0.45rem 0.9rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sidemenu__tab--on {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.sidemenu__close {
+  margin-left: auto;
+}
+
+.sidemenu__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.6rem 0.8rem 1.5rem;
+}
+
+.sidemenu__search {
+  width: 100%;
+}
+
+.sidemenu__hint {
+  margin: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.sidemenu__section {
+  margin-top: 0.9rem;
+}
+
+.sidemenu__section h3 {
+  margin: 0 0 0.4rem;
+  color: var(--accent-2);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.menu-entry {
+  display: flex;
+  gap: 0.3rem;
+  margin-bottom: 0.2rem;
+}
+
+.menu-entry__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-entry__main:hover:not(:disabled),
+.menu-entry__side:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.menu-entry__main:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menu-entry__sub {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-entry__side {
+  width: 2.6rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.seg__btn,
+.chip {
+  padding: 0.35rem 0.8rem;
+  border: 2px solid var(--surface-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.seg__btn--on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.chip--off {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.stepper > span:first-child {
+  width: 6rem;
+}
+
+.stepper__value {
+  min-width: 3.5rem;
+  text-align: center;
+  color: var(--muted);
 }
 
 /* ---------- sessions ---------- */
@@ -519,7 +699,7 @@ h2 {
 }
 
 .grid--small {
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr));
 }
 
 .card--static {
@@ -555,6 +735,36 @@ h2 {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.btn--danger {
+  background: #c62828;
+  color: #fff;
+}
+
+.home__section + .home__section {
+  margin-top: 2rem;
+}
+
+.card--new .card__title {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.grid--tiny {
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.8rem;
+}
+
+.home__sub {
+  margin: 1.2rem 0 0.6rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* The player covers everything; the page behind it must not scroll. */
+body:has(.player) {
+  overflow: hidden;
 }
 
 .row--left {
@@ -676,37 +886,21 @@ h2 {
 
 /* ---------- TV mode (inside the Android TV shell, M5) ---------- */
 
+/* Sized to the screen: 15px on a 960 px wide TV viewport (1080p at 2x), more on bigger ones. */
 html.tv {
-  font-size: 22px;
+  font-size: clamp(12px, min(1.6vw, 2.85vh), 40px);
 }
 
 html.tv :focus-visible,
 html.tv :focus {
-  outline: 4px solid #fff;
-  outline-offset: 3px;
-  box-shadow: 0 0 0 8px rgba(145, 71, 255, 0.6);
+  outline: 3px solid #fff;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 6px rgba(145, 71, 255, 0.55);
 }
 
 html.tv .card:focus {
   transform: scale(1.04);
   transition: transform 0.15s;
-}
-
-/* No hover on a TV: controls show while something inside the player has focus. */
-html.tv .player__bar {
-  opacity: 0;
-}
-
-html.tv .player:focus-within .player__bar {
-  opacity: 1;
-}
-
-html.tv .tile__label {
-  opacity: 1;
-}
-
-.player--mini:focus {
-  outline: 4px solid var(--accent-2);
 }
 
 /* ---------- chat overlay (M6) ---------- */
@@ -721,18 +915,6 @@ html.tv .tile__label {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-.chat--off {
-  top: auto;
-  bottom: 70px;
-  right: 18px;
-  opacity: 0;
-}
-
-.player:hover .chat--off,
-.player:focus-within .chat--off {
-  opacity: 1;
-}
-
 .chat__bg {
   position: absolute;
   inset: 0;
@@ -742,83 +924,65 @@ html.tv .tile__label {
 }
 
 .chat--adjusting {
-  outline: 3px dashed var(--accent-2);
+  outline: 2px dashed var(--accent-2);
 }
 
-.chat__header {
+/* The top edge: drag handle (mouse), the channel's name and a faint settings button. */
+.chat__grip {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: 0.3em;
+  min-height: 1.4em;
+  padding: 0.15em 0.4em 0;
   cursor: move;
-  font-size: 13px;
+  font-size: 0.8em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.chat__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat__gear {
+  margin-left: auto;
+  padding: 0 0.3em;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
   opacity: 0;
   transition: opacity 0.2s;
 }
 
-.chat:hover .chat__header,
-.chat:focus-within .chat__header,
-.chat--adjusting .chat__header,
-html.tv .chat__header {
-  opacity: 1;
-}
-
-.chat__mode {
-  padding: 2px 4px;
-  font-size: 12px;
-  max-width: 140px;
-}
-
-.chat__btn {
-  padding: 2px 7px;
-  border: 0;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  font: inherit;
-  cursor: pointer;
-}
-
-.chat__btn--on {
-  background: var(--accent);
-}
-
-.chat__channels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 0 6px 4px;
-  font-size: 12px;
-}
-
-.chat__chip {
-  padding: 1px 8px;
-  border: 2px solid;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.4);
-  color: #fff;
-  font: inherit;
-  cursor: pointer;
-}
-
-.chat__chip--off {
-  opacity: 0.4;
-  text-decoration: line-through;
+.chat:hover .chat__gear {
+  opacity: 0.8;
 }
 
 .chat__list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 10px 10px;
+  padding: 0.1em 0.6em 0.6em;
   overflow-wrap: anywhere;
   scrollbar-width: none;
 }
 
 .chat__line {
-  padding: 2px 0 2px 6px;
+  padding: 0.12em 0 0.12em 0.4em;
   border-left: 3px solid transparent;
   line-height: 1.35;
+}
+
+.chat__channel {
+  margin-right: 0.4em;
+  font-size: 0.75em;
+  font-weight: 700;
+  opacity: 0.9;
 }
 
 .chat__name {
@@ -842,17 +1006,24 @@ html.tv .chat__header {
   width: 14px;
   height: 14px;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.5) 50%);
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.35) 50%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.chat:hover .chat__resize,
+.chat--adjusting .chat__resize {
+  opacity: 1;
 }
 
 .chat__hint {
   position: absolute;
-  left: 8px;
-  bottom: 6px;
-  padding: 2px 8px;
+  left: 0.5em;
+  bottom: 0.4em;
+  padding: 0.15em 0.6em;
   border-radius: 4px;
   background: var(--accent);
-  font-size: 12px;
+  font-size: 0.8em;
 }
 
 /* ---------- settings ---------- */

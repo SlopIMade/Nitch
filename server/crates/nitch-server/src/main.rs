@@ -61,7 +61,7 @@ async fn server() -> Result<()> {
         events: tokio::sync::broadcast::channel(64).0,
     });
 
-    // Housekeeping for multiview: stop idle pipelines; retry offline tiles every minute.
+    // Housekeeping: stop idle pipelines and play sessions; retry offline tiles every minute.
     let housekeeping = state.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -69,6 +69,7 @@ async fn server() -> Result<()> {
         loop {
             tick.tick().await;
             housekeeping.multiview.reap();
+            housekeeping.player.reap();
             // A crashed pipeline that's still being watched comes back on its own.
             for id in housekeeping.multiview.failed_but_watched() {
                 if let Ok(Some(session)) = housekeeping.store.session(&id) {

@@ -1,12 +1,11 @@
 import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { NavLink, Route, Routes } from "react-router";
+import { Navigate, NavLink, Route, Routes } from "react-router";
 import { api } from "./api";
 import { HomePage } from "./pages/Home";
 import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
 import { SessionEditorPage } from "./pages/SessionEditor";
-import { SessionsPage } from "./pages/Sessions";
 import { SettingsPage } from "./pages/Settings";
 import { usePlayer } from "./player/PlayerContext";
 import { PlayerLayer } from "./player/PlayerLayer";
@@ -32,7 +31,6 @@ function Header() {
           Home
         </NavLink>
         <NavLink to="/search">Search</NavLink>
-        <NavLink to="/multiview">Multiview</NavLink>
         <NavLink to="/settings">Settings</NavLink>
       </nav>
       <div className="header__user">
@@ -54,23 +52,26 @@ function Header() {
   );
 }
 
-/** The TV remote's Back key: the topmost thing closes first (modal, full-screen player). */
+/**
+ * The TV remote's Back key: the topmost thing closes first. The player's side menu and chat
+ * adjusting handle Back themselves; then a modal, then the player (playback ends).
+ */
 function BackKey() {
-  const { target, mode, minimize } = usePlayer();
+  const { target, stop } = usePlayer();
   useEffect(
     () =>
       installBackHandler(() => {
-        if (document.querySelector(".modal, .chat--adjusting")) {
+        if (document.querySelector(".modal")) {
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
           return true;
         }
-        if (target && mode === "full") {
-          minimize();
+        if (target) {
+          stop();
           return true;
         }
         return false;
       }),
-    [target, mode, minimize],
+    [target, stop],
   );
   return null;
 }
@@ -103,7 +104,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/multiview" element={<SessionsPage />} />
+          <Route path="/multiview" element={<Navigate to="/" replace />} />
           <Route path="/multiview/:id" element={<SessionEditorPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<HomePage />} />

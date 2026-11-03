@@ -1,15 +1,27 @@
-// Renders the current target with hls.js: a single channel, or a multiview session (one video,
-// one audio track per tile). Full screen with controls, or a mini player while browsing.
-// Changing pages never unmounts it, so playback continues (D14).
+// The player: a single channel, or a multiview session (one video, one audio track per tile),
+// always full screen. Changing pages never unmounts it (D14); Back or ✕ ends playback.
+//
+// Switching what plays is seamless: the old stream keeps playing until the new one is ready,
+// so adding a second stream to a single view (which turns it into a multiview session) or
+// picking another channel never leaves the screen silent.
+//
+// Remote: ← → switch the tile (and its audio), hold ← for the side menu (add streams, chat),
+// ↑ ↓ reach the controls, OK shows them, Back leaves.
 
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router";
 import Hls, { type Level } from "hls.js";
 import { api, ApiError, GRID, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
-import { claimArrows, focusWithin } from "../tv";
-import { ChatOverlay } from "./ChatOverlay";
+import { addTile, removeTile } from "../layout";
+import { claimArrows, focusWithin, pressKind } from "../tv";
+import { setChatChannels } from "./chat";
+import { ChatOverlay, type ChatAdjust } from "./ChatOverlay";
 import { QUALITY_KEY } from "../pages/Settings";
 import { usePlayer, type Target } from "./PlayerContext";
+import { SideMenu, type MenuTab } from "./SideMenu";
+
+const MAX_TILES = 9;
 
 type Quality = { index: number; label: string };
 
@@ -48,7 +60,7 @@ const STATE_TEXT: Record<SlotInfo["state"], string | null> = {
   live: null,
   loading: "Waiting for the stream…",
   ad: "Ad break, back in a moment",
-  retrying: "Stream interrupted, reconnecting…",
+  retrying: "Reconnecting…",
   offline: "Offline",
 };
 
@@ -67,6 +79,7 @@ function TileOverlay({ slots, focus, onFocus }: { slots: (SlotInfo | null)[]; fo
               e.stopPropagation();
               onFocus(k);
             }}
+            tabIndex={-1}
             title={`${s.channel}: click for its audio`}
           >
             <span className="tile__label">
@@ -81,68 +94,123 @@ function TileOverlay({ slots, focus, onFocus }: { slots: (SlotInfo | null)[]; fo
   );
 }
 
+/**
+ * The tile layout as the viewer sees it: the server changes the picture immediately, but the
+ * player shows it only after its distance to the live edge, so overlays follow that late.
+ */
+function useShownSlots(slots: (SlotInfo | null)[] | undefined, hls: Hls | null): (SlotInfo | null)[] {
+  const [shown, setShown] = useState<(SlotInfo | null)[]>([]);
+  const layout = JSON.stringify((slots ?? []).map((s) => s && [s.channel, s.x, s.y, s.w, s.h, s.z]));
+  const latest = useRef(slots);
+  latest.current = slots;
+  const first = shown.length === 0;
+  useEffect(() => {
+    if (!latest.current) {
+      setShown([]);
+      return;
+    }
+    if (first) {
+      setShown(latest.current);
+      return;
+    }
+    const delay = ((hls?.latency ?? 6) + 1) * 1000;
+    const t = setTimeout(() => latest.current && setShown(latest.current), delay);
+    return () => clearTimeout(t);
+    // Only layout changes are delayed; states (live, ad, …) are taken along when they land.
+  }, [layout]);
+  // Tile states (live, ad, …) update right away.
+  return shown.map((s) => s && { ...s, state: slots?.find((n) => n?.channel === s.channel)?.state ?? s.state });
+}
+
 export function PlayerLayer() {
-  const { target, mode, minimize, expand, stop } = usePlayer();
+  const { target, play, playSession, stop } = usePlayer();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  /** What's attached to the video right now (it lags `target` while a switch is starting). */
+  const active = useRef<{ key: string; playId: string | null } | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [qualities, setQualities] = useState<Quality[]>([]);
   const [quality, setQuality] = useState(-1); // -1 = auto
   const [muted, setMuted] = useState(false);
   const [playId, setPlayId] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
+  const [audioTracks, setAudioTracks] = useState(0);
+  const [menu, setMenu] = useState<MenuTab | null>(null);
+  const [chatAdjust, setChatAdjust] = useState<ChatAdjust>(null);
+  const [controls, setControls] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
   // Bumped to start a broken multiview again (the server restarts a failed pipeline).
   const [attempt, setAttempt] = useState(0);
   const key = targetKey(target);
+  const ready = activeKey === key;
   const channel = target?.kind === "channel" ? target.channel : null;
   const sessionId = target?.kind === "session" ? target.id : null;
 
-  const info = useQuery({
-    queryKey: ["channel", channel],
-    queryFn: () => api.channel(channel!),
-    enabled: !!channel,
-    refetchInterval: 60_000,
-  });
   const status = useQuery({
     queryKey: ["play-status", playId],
     queryFn: () => api.playStatus(playId!),
-    enabled: !!playId,
+    enabled: !!playId && !!channel,
     refetchInterval: 2000,
   });
+  const session = useQuery({ queryKey: ["session", sessionId], queryFn: () => api.session(sessionId!), enabled: !!sessionId });
   const mv = useQuery<MultiviewInfo>({
     queryKey: ["multiview", sessionId],
     queryFn: () => api.multiviewStatus(sessionId!),
-    enabled: !!sessionId && !loading,
+    enabled: !!sessionId && ready,
     refetchInterval: 2000,
   });
+  const slots = useShownSlots(ready ? mv.data?.slots : undefined, hlsRef.current);
+  const occupied = slots.map((s, k) => (s ? k : -1)).filter((k) => k >= 0);
+
+  // The channels in view, and their stream info (titles: recommendations in the side menu).
+  const inView = channel ? [channel] : (session.data?.tiles.map((t) => t.channel) ?? []);
+  const infos = useQueries({
+    queries: inView.map((login) => ({ queryKey: ["channel", login], queryFn: () => api.channel(login), refetchInterval: 60_000 })),
+  });
+  const titles = infos.flatMap((q) => (q.data?.live ? [q.data.live.title] : []));
+  const focusedChannel = channel ?? slots[focus]?.channel ?? null;
+
+  // Chat of everything in view is read (and kept) while the player is open.
+  const chatKey = inView.join(",");
+  useEffect(() => {
+    setChatChannels(chatKey ? chatKey.split(",") : []);
+  }, [chatKey]);
+  useEffect(() => () => setChatChannels([]), []);
+
+  // ---------- playback ----------
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!target || !video) return;
+    if (!target || !video || !key) return;
     let cancelled = false;
     setError(null);
-    setLoading(true);
-    setQualities([]);
-    setQuality(-1);
-    setPlayId(null);
-    if (attempt === 0) setFocus(0);
 
-    const source: Promise<string> =
+    const source: Promise<{ url: string; playId: string | null; first: number }> =
       target.kind === "channel"
-        ? api.play(target.channel).then(({ id, hls_url }) => {
-            if (!cancelled) setPlayId(id);
-            return hls_url;
-          })
-        : api.playSession(target.id).then((m) => {
-            const first = m.slots.findIndex((s) => s !== null);
-            if (!cancelled && attempt === 0) setFocus(Math.max(0, first));
-            return m.hls_url;
-          });
+        ? api.play(target.channel).then(({ id, hls_url }) => ({ url: hls_url, playId: id, first: 0 }))
+        : api.playSession(target.id).then((m) => ({ url: m.hls_url, playId: null, first: Math.max(0, m.slots.findIndex((s) => s !== null)) }));
 
     source
-      .then((hls_url) => {
-        if (cancelled) return;
+      .then(({ url, playId: newPlayId, first }) => {
+        if (cancelled) {
+          if (newPlayId) void api.stopPlay(newPlayId);
+          return;
+        }
+        // The new stream is ready: replace the old one now.
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+        if (active.current?.playId && active.current.playId !== newPlayId) void api.stopPlay(active.current.playId);
+        active.current = { key, playId: newPlayId };
+        setActiveKey(key);
+        setPlayId(newPlayId);
+        setQualities([]);
+        setQuality(-1);
+        setAudioTracks(0);
+        if (attempt === 0) setFocus(first);
+
         const start = () =>
           video.play().catch(() => {
             // Autoplay with sound can be blocked; start muted instead.
@@ -150,65 +218,78 @@ export function PlayerLayer() {
             setMuted(true);
             return video.play();
           });
-        if (Hls.isSupported()) {
-          const hls = new Hls({
-            liveSyncDurationCount: 3,
-            lowLatencyMode: false,
-            // Never drift away from live: after a stall, play up to 8 % faster until back at
-            // the target distance; beyond 8 segments, jump.
-            maxLiveSyncPlaybackRate: 1.08,
-            liveMaxLatencyDurationCount: 8,
-          });
-          hlsRef.current = hls;
-          hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
-            // This device's quality limit (Settings): cap automatic switching at that height.
-            const limit = Number(localStorage.getItem(QUALITY_KEY));
-            if (limit && target.kind === "channel") {
-              const allowed = data.levels.map((l, i) => ({ h: l.height, i })).filter((l) => l.h > 0 && l.h <= limit);
-              if (allowed.length) hls.autoLevelCapping = allowed.reduce((a, b) => (b.h > a.h ? b : a)).i;
-            }
-            setQualities(
-              data.levels
-                .map((l, index) => ({ index, label: levelLabel(l), height: l.height }))
-                .filter((q) => q.height > 0)
-                .map(({ index, label }) => ({ index, label })),
-            );
-            start();
-          });
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (!data.fatal) return;
-            hls.destroy();
-            if (target.kind === "session" && attempt < 3) {
-              setTimeout(() => !cancelled && setAttempt((a) => a + 1), 2000);
-            } else {
-              setError(`Playback failed (${data.details})`);
-            }
-          });
-          hls.loadSource(hls_url);
-          hls.attachMedia(video);
-        } else {
+        if (!Hls.isSupported()) {
           // Safari plays HLS natively.
-          video.src = hls_url;
-          start();
+          video.src = url;
+          void start();
+          return;
         }
+        const hls = new Hls({
+          liveSyncDurationCount: 3,
+          lowLatencyMode: false,
+          // Never drift away from live: after a stall, play up to 8 % faster until back at
+          // the target distance; beyond 8 segments, jump.
+          maxLiveSyncPlaybackRate: 1.08,
+          liveMaxLatencyDurationCount: 8,
+        });
+        hlsRef.current = hls;
+        hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
+          // This device's quality limit (Settings): cap automatic switching at that height.
+          const limit = Number(localStorage.getItem(QUALITY_KEY));
+          if (limit && target.kind === "channel") {
+            const allowed = data.levels.map((l, i) => ({ h: l.height, i })).filter((l) => l.h > 0 && l.h <= limit);
+            if (allowed.length) hls.autoLevelCapping = allowed.reduce((a, b) => (b.h > a.h ? b : a)).i;
+          }
+          setQualities(
+            data.levels
+              .map((l, index) => ({ index, label: levelLabel(l), height: l.height }))
+              .filter((q) => q.height > 0)
+              .map(({ index, label }) => ({ index, label })),
+          );
+          void start();
+        });
+        hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (_e, data) => setAudioTracks(data.audioTracks.length));
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (!data.fatal) return;
+          hls.destroy();
+          if (hlsRef.current === hls) hlsRef.current = null;
+          if (target.kind === "session" && attempt < 3) {
+            setTimeout(() => setAttempt((a) => a + 1), 2000);
+          } else {
+            setError(`Playback failed (${data.details})`);
+          }
+        });
+        hls.loadSource(url);
+        hls.attachMedia(video);
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof ApiError ? e.message : "Could not start the stream");
-      })
-      .finally(() => !cancelled && setLoading(false));
+      });
 
     return () => {
       cancelled = true;
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      video.removeAttribute("src");
-      video.load();
     };
     // `key` identifies the target; the object itself changes identity on every play().
   }, [key, attempt]);
 
   // A new target starts with a fresh retry budget.
   useEffect(() => setAttempt(0), [key]);
+
+  // Nothing to play: tear everything down (and tell the server the stream isn't watched).
+  const teardown = useCallback(() => {
+    hlsRef.current?.destroy();
+    hlsRef.current = null;
+    if (active.current?.playId) void api.stopPlay(active.current.playId);
+    active.current = null;
+    setActiveKey(null);
+    setPlayId(null);
+    setMenu(null);
+    setChatAdjust(null);
+  }, []);
+  useEffect(() => {
+    if (!target) teardown();
+  }, [target, teardown]);
+  useEffect(() => teardown, [teardown]);
 
   useEffect(() => {
     if (hlsRef.current) hlsRef.current.currentLevel = quality;
@@ -219,20 +300,17 @@ export function PlayerLayer() {
   }, [muted]);
 
   // Multiview: the focused tile's audio track plays (instant, no server round trip, D7).
-  const audioTracks = hlsRef.current?.audioTracks.length ?? 0;
   useEffect(() => {
     const hls = hlsRef.current;
-    if (!sessionId || !hls) return;
+    if (!sessionId || !hls || !ready) return;
     const index = hls.audioTracks.findIndex((t) => t.name === `slot${focus}`);
     if (index >= 0 && hls.audioTrack !== index) hls.audioTrack = index;
-  }, [focus, sessionId, audioTracks, loading]);
+  }, [focus, sessionId, audioTracks, ready]);
 
-  // Multiview full screen: left/right switch the tile (unless the focus is in the chat or the
-  // controls, which up/down reach through the normal navigation).
+  // A focused tile that went away: focus the first one left.
   useEffect(() => {
-    if (sessionId && mode === "full")
-      return claimArrows((e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && !focusWithin(".chat", ".player__bar"));
-  }, [sessionId, mode]);
+    if (sessionId && occupied.length > 0 && !occupied.includes(focus)) setFocus(occupied[0]);
+  }, [sessionId, occupied.join(), focus]);
 
   // The remote's Play/Pause key (sent by the TV shell).
   useEffect(() => {
@@ -249,100 +327,209 @@ export function PlayerLayer() {
     window.NitchTV?.setKeepScreenOn(!!target);
   }, [target]);
 
-  const slots = mv.data?.slots ?? [];
-  const occupied = slots.map((s, k) => (s ? k : -1)).filter((k) => k >= 0);
+  // ---------- controls ----------
 
-  // Escape leaves full screen view (back to browsing, stream keeps playing); arrows move the
-  // multiview focus.
+  const hideTimer = useRef(0);
+  const poke = useCallback(() => {
+    setControls(true);
+    clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => setControls(false), 3500);
+  }, []);
   useEffect(() => {
-    if (mode !== "full" || !target) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") minimize();
-      if (
-        sessionId &&
-        occupied.length > 0 &&
-        (e.key === "ArrowRight" || e.key === "ArrowLeft") &&
-        !focusWithin(".chat", ".player__bar")
-      ) {
-        const i = Math.max(0, occupied.indexOf(focus));
-        const next = (i + (e.key === "ArrowRight" ? 1 : occupied.length - 1)) % occupied.length;
-        setFocus(occupied[next]);
+    if (target) poke();
+  }, [key, poke]);
+
+  const openMenu = (tab: MenuTab) => {
+    setChatAdjust(null);
+    setMenu(tab);
+  };
+  const closeMenu = useCallback(() => {
+    setMenu(null);
+    (document.activeElement as HTMLElement | null)?.blur();
+  }, []);
+  const adjustDone = useCallback(() => setChatAdjust(null), []);
+
+  // ← → switch the tile, holding ← opens the menu. Only while the focus isn't in the controls.
+  const playerKeys = !!target && !menu && !chatAdjust;
+  useEffect(() => {
+    if (!playerKeys) return;
+    const inControls = () => focusWithin(".player__bar");
+    const release = claimArrows((e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && !inControls());
+    const step = (d: number) => {
+      if (!sessionId || occupied.length < 2) return;
+      const i = Math.max(0, occupied.indexOf(focus));
+      setFocus(occupied[(i + d + occupied.length) % occupied.length]);
+    };
+    const onDown = (e: KeyboardEvent) => {
+      poke();
+      if (e.key === "Escape") {
+        stop();
+        return;
+      }
+      if (inControls()) return;
+      if (e.key === "ArrowLeft" && pressKind(e, "ArrowLeft") === "long") openMenu("add");
+      if (e.key === "ArrowRight" && !e.repeat) {
+        e.preventDefault();
+        step(1);
+      }
+      if (e.key === "Enter" && (document.activeElement === document.body || !document.activeElement)) {
+        e.preventDefault();
+        document.querySelector<HTMLElement>(".player__bar--bottom button")?.focus();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [mode, target, minimize, sessionId, occupied, focus]);
+    const onUp = (e: KeyboardEvent) => {
+      if (!inControls() && pressKind(e, "ArrowLeft") === "short") step(-1);
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      release();
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, [playerKeys, sessionId, occupied.join(), focus, stop, poke]);
 
-  if (!target) return <video ref={videoRef} hidden />;
+  // ---------- changing what's in view ----------
 
-  const live = info.data?.live;
-  const title = target.kind === "channel" ? (info.data?.display_name ?? target.channel) : target.name;
+  const tiles = session.data?.tiles ?? [];
+  const full = !!sessionId && tiles.length >= MAX_TILES;
+
+  const add = async (login: string) => {
+    setMenu(null);
+    try {
+      if (channel) {
+        if (login === channel) return;
+        setBusy(`Adding ${login}…`);
+        const s = await api.createSession(`${channel} + ${login}`, addTile(addTile([], channel), login));
+        qc.invalidateQueries({ queryKey: ["sessions"] });
+        playSession(s.id, s.name);
+      } else if (sessionId && session.data) {
+        if (tiles.some((t) => t.channel === login) || full) return;
+        setBusy(`Adding ${login}…`);
+        const s = await api.updateSession(sessionId, { tiles: addTile(tiles, login) });
+        qc.setQueryData(["session", sessionId], s);
+        qc.invalidateQueries({ queryKey: ["sessions"] });
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add the stream");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async (c: string) => {
+    if (!sessionId || tiles.length < 2) return;
+    const s = await api.updateSession(sessionId, { tiles: removeTile(tiles, tiles.findIndex((t) => t.channel === c)) });
+    qc.setQueryData(["session", sessionId], s);
+    qc.invalidateQueries({ queryKey: ["sessions"] });
+  };
+
+  const focusTile = (c: string) => {
+    const k = slots.findIndex((s) => s?.channel === c);
+    if (k >= 0) setFocus(k);
+    closeMenu();
+  };
+
+  // While a switch is starting, the old stream plays on; say what's happening.
+  const starting = !!target && !ready && !error;
+  useEffect(() => {
+    if (!starting) return;
+    setBusy(sessionId ? "Starting the multiview…" : "Loading…");
+    return () => setBusy(null);
+  }, [starting, sessionId]);
+
+  if (!target) return null;
+
+  const info = infos[0]?.data;
+  const live = channel ? info?.live : null;
+  const title = target.kind === "channel" ? (info?.display_name ?? target.channel) : target.name;
   return (
     <div
-      className={`player player--${mode}`}
-      onClick={mode === "mini" ? expand : undefined}
-      // The mini player is reachable with the remote: focus it, press OK to go back to full screen.
-      tabIndex={mode === "mini" ? 0 : undefined}
-      onKeyDown={mode === "mini" ? (e) => e.key === "Enter" && e.target === e.currentTarget && expand() : undefined}
+      className={`player${controls || menu ? " player--controls" : ""}`}
+      onMouseMove={poke}
+      onClick={() => menu && closeMenu()}
     >
       <div className="player__stage">
         <video ref={videoRef} className="player__video" playsInline />
-        {sessionId && mode === "full" && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} />}
-        {mode === "full" && (
-          <ChatOverlay
-            focused={channel ?? slots[focus]?.channel ?? null}
-            all={channel ? [channel] : slots.flatMap((s) => (s ? [s.channel] : []))}
-          />
-        )}
+        {sessionId && ready && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} />}
       </div>
-      {loading && <div className="player__status">{sessionId ? "Starting the multiview…" : "Loading…"}</div>}
+      {activeKey && (
+        <ChatOverlay
+          focused={focusedChannel}
+          all={inView}
+          adjust={chatAdjust}
+          onAdjustDone={adjustDone}
+          onSettings={() => openMenu("chat")}
+        />
+      )}
+      {!activeKey && !error && <div className="player__status">{sessionId ? "Starting the multiview…" : "Loading…"}</div>}
+      {activeKey && busy && <div className="player__toast">{busy}</div>}
       {error && <div className="player__status player__status--error">{error}</div>}
-      {channel && <AdBadge ad={status.data?.ad ?? null} hls={hlsRef.current} />}
-      {mode === "full" ? (
-        <>
-          <div className="player__bar player__bar--top">
-            <button className="btn btn--ghost" onClick={minimize} title="Back (Esc)">
-              ← Back
-            </button>
-            <div className="player__title">
-              <strong>{title}</strong>
-              {live && <span className="muted"> · {live.game}</span>}
-              {live && <div className="player__subtitle">{live.title}</div>}
-              {sessionId && slots[focus] && <div className="player__subtitle">Audio: {slots[focus]!.channel} (← → to switch)</div>}
-            </div>
-            <button className="btn btn--ghost" onClick={stop} title="Stop">
-              ✕
-            </button>
-          </div>
-          <div className="player__bar player__bar--bottom">
-            <button className="btn btn--ghost" onClick={() => setMuted((m) => !m)}>
-              {muted ? "Unmute" : "Mute"}
-            </button>
-            {channel && qualities.length > 0 && (
-              <select className="select" value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
-                <option value={-1}>Auto</option>
-                {qualities.map((q) => (
-                  <option key={q.index} value={q.index}>
-                    {q.label}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="player__mini-bar">
-          <span>{title}</span>
-          <button
-            className="btn btn--ghost btn--small"
-            onClick={(e) => {
-              e.stopPropagation();
-              stop();
-            }}
-          >
-            ✕
-          </button>
+      {channel && ready && <AdBadge ad={status.data?.ad ?? null} hls={hlsRef.current} />}
+
+      {/* The bottom bar comes first: with nothing focused, the remote's arrows start there. */}
+      <div className="player__bar player__bar--bottom">
+        <button className="btn btn--ghost" onClick={() => openMenu("add")} title="Add streams (hold ← on the remote)">
+          ＋ Streams
+        </button>
+        <button className="btn btn--ghost" onClick={() => openMenu("chat")}>
+          Chat
+        </button>
+        <button className="btn btn--ghost" onClick={() => setMuted((m) => !m)}>
+          {muted ? "Unmute" : "Mute"}
+        </button>
+        {channel && qualities.length > 0 && (
+          <select className="select" value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
+            <option value={-1}>Auto</option>
+            {qualities.map((q) => (
+              <option key={q.index} value={q.index}>
+                {q.label}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="player__keys">{sessionId ? "← → tile · hold ← menu" : "hold ← menu"}</span>
+      </div>
+
+      <div className="player__bar player__bar--top">
+        <button className="btn btn--ghost" onClick={stop} title="Back (Esc)">
+          ← Back
+        </button>
+        <div className="player__title">
+          <strong>{title}</strong>
+          {live && <span className="muted"> · {live.game}</span>}
+          {live && <div className="player__subtitle">{live.title}</div>}
+          {sessionId && slots[focus] && <div className="player__subtitle">Audio: {slots[focus]!.channel}</div>}
         </div>
+      </div>
+      {menu && (
+        <SideMenu
+          tab={menu}
+          onTab={setMenu}
+          onClose={closeMenu}
+          inView={inView}
+          titles={titles}
+          onWatch={(login) => {
+            closeMenu();
+            if (login !== channel) play(login);
+          }}
+          onAdd={add}
+          onRemove={sessionId && tiles.length > 1 ? remove : null}
+          onFocusTile={focusTile}
+          onEditLayout={
+            sessionId
+              ? () => {
+                  stop();
+                  navigate(`/multiview/${sessionId}`);
+                }
+              : null
+          }
+          onAdjustChat={(a) => {
+            setMenu(null);
+            setChatAdjust(a);
+          }}
+          full={full}
+        />
       )}
     </div>
   );

@@ -49,7 +49,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/search", get(search))
         .route("/api/channels/{login}", get(channel))
         .route("/api/play", post(play))
-        .route("/api/play/{id}", get(play_status))
+        .route("/api/play/{id}", get(play_status).delete(stop_play))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/templates", get(session_templates))
         .route("/api/sessions/{id}", get(get_session).patch(update_session).delete(delete_session))
@@ -275,6 +275,12 @@ async fn play(State(s): St, Json(req): Json<PlayRequest>) -> ApiResult<serde_jso
 
 async fn play_status(State(s): St, Path(id): Path<String>) -> ApiResult<PlayStatus> {
     s.player.status(&id).map(Json).ok_or_else(|| ApiError::NotFound("unknown play session".into()))
+}
+
+/// The player left this stream: end the play session now instead of waiting for it to idle out.
+async fn stop_play(State(s): St, Path(id): Path<String>) -> StatusCode {
+    s.player.remove(&id);
+    StatusCode::NO_CONTENT
 }
 
 // ---------- multiview sessions (D17) ----------

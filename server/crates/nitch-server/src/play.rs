@@ -20,7 +20,9 @@ use serde::Serialize;
 use url::Url;
 
 /// Play sessions nobody fetched for this long are dropped.
-const IDLE: Duration = Duration::from_secs(10 * 60);
+/// A play session nobody fetched for this long is dropped. Players refresh the playlist every
+/// few seconds, multiview tiles likewise, so only abandoned sessions get this old.
+const IDLE: Duration = Duration::from_secs(45);
 /// Backup sources in priority order. `embed` got its ads at other times than `site` in S1; the
 /// others add independent sessions so that some source is ad-free as often as possible.
 pub const BACKUP_PLAYER_TYPES: &[&str] = &["embed", "popout", "autoplay", "frontpage"];
@@ -146,7 +148,6 @@ impl Player {
             .map(|p| Backup { player_type: p.clone(), master: None, failed: None })
             .collect();
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|_, s| s.last_access.elapsed() < IDLE);
         sessions.insert(
             id.clone(),
             PlaySession {
@@ -214,7 +215,18 @@ impl Player {
             .collect()
     }
 
-    /// Ends a play session (e.g. a multiview tile that was removed).
+    /// Drops abandoned play sessions (housekeeping).
+    pub fn reap(&self) {
+        self.sessions.lock().unwrap().retain(|id, s| {
+            let keep = s.last_access.elapsed() < IDLE;
+            if !keep {
+                tracing::info!(%id, channel = %s.channel, "play session ended (idle)");
+            }
+            keep
+        });
+    }
+
+    /// Ends a play session (a player that left it, a multiview tile that was removed).
     pub fn remove(&self, id: &str) {
         self.sessions.lock().unwrap().remove(id);
     }

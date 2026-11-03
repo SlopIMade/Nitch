@@ -5,6 +5,8 @@
 // input works with the remote without extra code. Components that use the arrows themselves
 // (multiview focus, the grid editor) claim them while they need them.
 
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+
 /** The Android TV shell sets this in its user agent and exposes `window.NitchTV`. */
 export const isTv = /NitchTV/.test(navigator.userAgent);
 
@@ -45,11 +47,12 @@ function visible(el: Element): boolean {
   return style.visibility !== "hidden" && style.display !== "none";
 }
 
-/** Elements inside the topmost layer (a modal or the full-screen player), else the whole page. */
+/** Elements inside the topmost layer (a modal, the side menu, the player), else the whole page. */
 function candidates(): HTMLElement[] {
   const layer =
-    document.querySelector(".modal") ?? document.querySelector(".player--full") ?? document.body;
-  return [...layer.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(visible);
+    document.querySelector(".modal") ?? document.querySelector(".sidemenu") ?? document.querySelector(".player") ?? document.body;
+  // tabindex=-1 marks things only the mouse uses (multiview tiles, the chat's gear).
+  return [...layer.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.getAttribute("tabindex") !== "-1" && visible(el));
 }
 
 type Dir = "up" | "down" | "left" | "right";
@@ -91,6 +94,39 @@ export function moveFocus(dir: Dir): boolean {
   best.focus();
   best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
   return true;
+}
+
+/** How long a key must be held to count as a long press. */
+export const LONG_PRESS_MS = 450;
+
+let press: { key: string; target: EventTarget | null; t0: number; fired: boolean } | null = null;
+
+/**
+ * Tells short from long presses of `key` (the remote holds a key by repeating keydown). Call it
+ * from keydown and keyup handlers: returns "long" once while the key is held long enough,
+ * "short" on keyup if it wasn't, otherwise null. On keydown the default action is prevented, so
+ * a held OK doesn't also click.
+ */
+export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string): "short" | "long" | null {
+  if (e.key !== key) return null;
+  if (e.type === "keydown") {
+    e.preventDefault();
+    if (!e.repeat || !press || press.key !== key) {
+      press = { key, target: e.target, t0: performance.now(), fired: false };
+      return null;
+    }
+    if (!press.fired && performance.now() - press.t0 >= LONG_PRESS_MS) {
+      press.fired = true;
+      return "long";
+    }
+    return null;
+  }
+  if (e.type === "keyup" && press?.key === key) {
+    const short = !press.fired && press.target === e.target;
+    press = null;
+    return short ? "short" : null;
+  }
+  return null;
 }
 
 const KEYS: Record<string, Dir> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };

@@ -1,75 +1,43 @@
 // Chat overlay (M6, D12): drawn by the client over the video, so it stays sharp and changes
 // instantly. Modes: off, the focused stream, or one combined window of several streams.
-// Position, size (percent of the 16:9 stage), font size and opacity are saved per device and
-// change live. Mouse: drag the header, drag the corner. Remote/keyboard: "Move" or "Size",
-// then the arrows; OK or Back to finish.
+// It can sit anywhere on the screen, black bars included. Settings live in chatSettings.ts and
+// change from the side menu (remote) or here with the mouse: drag the top edge to move, the
+// corner to resize, Ctrl + wheel for the text size. For the remote, `adjust` turns the arrows
+// into move/resize until OK or Back.
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { claimArrows } from "../tv";
-import { parts, watchChat, type ChatMessage } from "./chat";
+import { parts, useChatMessages } from "./chat";
+import { channelColor, updateChat, useChatSettings, type ChatSettings } from "./chatSettings";
 
-type Mode = "off" | "focused" | "combined";
-type Settings = { mode: Mode; x: number; y: number; w: number; h: number; font: number; opacity: number; exclude: string[] };
+export type ChatAdjust = "move" | "size" | null;
 
-const KEY = "nitch.chat";
-const DEFAULTS: Settings = { mode: "focused", x: 73, y: 4, w: 25, h: 72, font: 15, opacity: 0.55, exclude: [] };
-const KEEP = 150;
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-
-function load(): Settings {
-  try {
-    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) ?? "{}") };
-  } catch {
-    return DEFAULTS;
-  }
+/** The channels the chat shows, given the settings and what's on screen. */
+export function shownChannels(s: ChatSettings, focused: string | null, all: string[]): string[] {
+  if (s.mode === "off") return [];
+  if (s.mode === "focused" || all.length < 2) return focused ? [focused] : [];
+  return all.filter((c) => !s.exclude.includes(c));
 }
 
-/** A stable color per channel for the stripe in the combined chat. */
-function channelColor(channel: string): string {
-  let h = 0;
-  for (const c of channel) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `hsl(${h} 70% 60%)`;
-}
-
-export function ChatOverlay({ focused, all }: { focused: string | null; all: string[] }) {
-  const [s, setS] = useState<Settings>(load);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [adjust, setAdjust] = useState<"move" | "size" | null>(null);
-  const box = useRef<HTMLDivElement>(null);
+export function ChatOverlay({
+  focused,
+  all,
+  adjust,
+  onAdjustDone,
+  onSettings,
+}: {
+  focused: string | null;
+  all: string[];
+  adjust: ChatAdjust;
+  onAdjustDone: () => void;
+  onSettings: () => void;
+}) {
+  const s = useChatSettings();
+  const channels = shownChannels(s, focused, all);
+  const messages = useChatMessages(channels);
   const list = useRef<HTMLDivElement>(null);
-  const update = (patch: Partial<Settings>) =>
-    setS((old) => {
-      const next = { ...old, ...patch };
-      localStorage.setItem(KEY, JSON.stringify(next));
-      return next;
-    });
-
-  const channels =
-    s.mode === "off" ? [] : s.mode === "focused" ? (focused ? [focused] : []) : all.filter((c) => !s.exclude.includes(c));
-  const key = channels.join(",");
-
-  // Subscribe to the shown channels; batch incoming messages into one update per frame.
-  useEffect(() => {
-    if (channels.length === 0) return;
-    setMessages([]);
-    let pending: ChatMessage[] = [];
-    let frame = 0;
-    const stop = watchChat(channels, (m) => {
-      pending.push(m);
-      if (!frame)
-        frame = requestAnimationFrame(() => {
-          const batch = pending;
-          pending = [];
-          frame = 0;
-          setMessages((old) => [...old, ...batch].slice(-KEEP));
-        });
-    });
-    return () => {
-      stop();
-      cancelAnimationFrame(frame);
-    };
-    // `key` stands for `channels`.
-  }, [key]);
+  const box = useRef<HTMLDivElement>(null);
+  const mixed = channels.length > 1;
 
   // Stick to the newest message.
   useEffect(() => {
@@ -77,7 +45,7 @@ export function ChatOverlay({ focused, all }: { focused: string | null; all: str
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Adjusting with arrows (remote): the chat claims the arrows until OK, Back or Escape.
+  // Remote: the arrows move or resize the chat until OK, Back or Escape.
   useEffect(() => {
     if (!adjust) return;
     const release = claimArrows();
@@ -85,41 +53,41 @@ export function ChatOverlay({ focused, all }: { focused: string | null; all: str
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (d) {
         e.preventDefault();
-        setS((old) => {
-          const next =
-            adjust === "move"
-              ? { ...old, x: clamp(old.x + d[0], 0, 100 - old.w), y: clamp(old.y + d[1], 0, 100 - old.h) }
-              : { ...old, w: clamp(old.w + d[0], 12, 100 - old.x), h: clamp(old.h + d[1], 15, 100 - old.y) };
-          localStorage.setItem(KEY, JSON.stringify(next));
-          return next;
-        });
+        e.stopPropagation();
+        const step = e.repeat ? 2 : 1;
+        updateChat((o) =>
+          adjust === "move" ? { x: o.x + d[0] * step, y: o.y + d[1] * step } : { w: o.w + d[0] * step, h: o.h + d[1] * step },
+        );
       } else if (e.key === "Enter" || e.key === "Escape") {
         e.preventDefault();
-        setAdjust(null);
+        e.stopPropagation();
+        onAdjustDone();
       }
     };
+    const onBack = (e: Event) => {
+      e.stopImmediatePropagation();
+      onAdjustDone();
+    };
     window.addEventListener("keydown", onKey, true);
+    window.addEventListener("nitch:back", onBack, true);
     return () => {
       release();
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("nitch:back", onBack, true);
     };
-  }, [adjust]);
+  }, [adjust, onAdjustDone]);
 
-  // Mouse: drag the header to move, the corner to resize (in percent of the stage).
+  // Mouse: drag the top edge to move, the corner to resize (in percent of the screen).
   const startDrag = (e: ReactPointerEvent, what: "move" | "size") => {
-    const stage = box.current?.parentElement?.getBoundingClientRect();
-    if (!stage) return;
+    const screen = box.current?.parentElement?.getBoundingClientRect();
+    if (!screen) return;
     e.preventDefault();
     const start = { px: e.clientX, py: e.clientY, s };
     const onMove = (ev: PointerEvent) => {
-      const dx = ((ev.clientX - start.px) / stage.width) * 100;
-      const dy = ((ev.clientY - start.py) / stage.height) * 100;
+      const dx = ((ev.clientX - start.px) / screen.width) * 100;
+      const dy = ((ev.clientY - start.py) / screen.height) * 100;
       const o = start.s;
-      update(
-        what === "move"
-          ? { x: clamp(o.x + dx, 0, 100 - o.w), y: clamp(o.y + dy, 0, 100 - o.h) }
-          : { w: clamp(o.w + dx, 12, 100 - o.x), h: clamp(o.h + dy, 15, 100 - o.y) },
-      );
+      updateChat(what === "move" ? { x: o.x + dx, y: o.y + dy } : { w: o.w + dx, h: o.h + dy });
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -129,77 +97,55 @@ export function ChatOverlay({ focused, all }: { focused: string | null; all: str
     window.addEventListener("pointerup", onUp);
   };
 
-  const modeButton = (
-    <select className="select chat__mode" value={s.mode} onChange={(e) => update({ mode: e.target.value as Mode })} aria-label="Chat">
-      <option value="off">Chat off</option>
-      <option value="focused">Chat: focused stream</option>
-      {all.length > 1 && <option value="combined">Chat: combined</option>}
-    </select>
-  );
-
-  if (s.mode === "off") return <div className="chat chat--off">{modeButton}</div>;
+  if (s.mode === "off" && !adjust) return null;
 
   return (
     <div
       ref={box}
       className={`chat${adjust ? " chat--adjusting" : ""}`}
-      style={{ left: `${s.x}%`, top: `${s.y}%`, width: `${s.w}%`, height: `${s.h}%`, fontSize: s.font }}
+      style={{ left: `${s.x}%`, top: `${s.y}%`, width: `${s.w}%`, height: `${s.h}%`, fontSize: `${s.font}rem` }}
       onWheel={(e) => {
-        // Ctrl + wheel: font size.
         if (e.ctrlKey) {
           e.preventDefault();
-          update({ font: clamp(s.font + (e.deltaY < 0 ? 1 : -1), 10, 40) });
+          updateChat((o) => ({ font: o.font + (e.deltaY < 0 ? 0.05 : -0.05) }));
         }
       }}
     >
       <div className="chat__bg" style={{ opacity: s.opacity }} />
-      <div className="chat__header" onPointerDown={(e) => e.target === e.currentTarget && startDrag(e, "move")}>
-        {modeButton}
-        <button className="chat__btn" onClick={() => update({ font: clamp(s.font - 1, 10, 40) })} title="Smaller text">
-          A−
-        </button>
-        <button className="chat__btn" onClick={() => update({ font: clamp(s.font + 1, 10, 40) })} title="Larger text">
-          A+
-        </button>
+      <div className="chat__grip" onPointerDown={(e) => startDrag(e, "move")} title="Drag to move">
+        {!mixed && channels[0] && <span className="chat__title">{channels[0]}</span>}
         <button
-          className="chat__btn"
-          onClick={() => update({ opacity: Math.round(clamp(s.opacity + (s.opacity >= 0.9 ? -0.8 : 0.15), 0.1, 0.95) * 100) / 100 })}
-          title="Background opacity"
+          className="chat__gear"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onSettings}
+          title="Chat settings"
+          tabIndex={-1}
         >
-          ◐
-        </button>
-        <button className={`chat__btn${adjust === "move" ? " chat__btn--on" : ""}`} onClick={() => setAdjust(adjust === "move" ? null : "move")}>
-          Move
-        </button>
-        <button className={`chat__btn${adjust === "size" ? " chat__btn--on" : ""}`} onClick={() => setAdjust(adjust === "size" ? null : "size")}>
-          Size
+          ⚙
         </button>
       </div>
-      {s.mode === "combined" && all.length > 1 && (
-        <div className="chat__channels">
-          {all.map((c) => (
-            <button
-              key={c}
-              className={`chat__chip${s.exclude.includes(c) ? " chat__chip--off" : ""}`}
-              style={{ borderColor: channelColor(c) }}
-              onClick={() => update({ exclude: s.exclude.includes(c) ? s.exclude.filter((x) => x !== c) : [...s.exclude, c] })}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      )}
       <div className="chat__list" ref={list}>
-        {channels.length === 0 && <div className="chat__empty">No stream selected.</div>}
-        {messages.map((m, i) => (
-          <div key={i} className="chat__line" style={s.mode === "combined" ? { borderLeftColor: channelColor(m.channel) } : undefined}>
+        {channels.length === 0 && <div className="chat__empty">Chat is off.</div>}
+        {messages.map((m) => (
+          <div key={m.seq} className="chat__line" style={mixed ? { borderLeftColor: channelColor(m.channel) } : undefined}>
+            {mixed && (
+              <span className="chat__channel" style={{ color: channelColor(m.channel) }}>
+                {m.channel}
+              </span>
+            )}
             <span className="chat__name" style={{ color: m.color || "#a970ff" }}>
               {m.display_name}
             </span>
             <span className="chat__sep">: </span>
             {parts(m).map((p, j) =>
               "emote" in p ? (
-                <img key={j} className="chat__emote" alt={p.name} title={p.name} src={`https://static-cdn.jtvnw.net/emoticons/v2/${p.emote}/default/dark/1.0`} />
+                <img
+                  key={j}
+                  className="chat__emote"
+                  alt={p.name}
+                  title={p.name}
+                  src={`https://static-cdn.jtvnw.net/emoticons/v2/${p.emote}/default/dark/1.0`}
+                />
               ) : (
                 <span key={j}>{p.text}</span>
               ),
@@ -207,8 +153,8 @@ export function ChatOverlay({ focused, all }: { focused: string | null; all: str
           </div>
         ))}
       </div>
-      <div className="chat__resize" onPointerDown={(e) => startDrag(e, "size")} title="Resize" />
-      {adjust && <div className="chat__hint">{adjust === "move" ? "Arrows move" : "Arrows resize"} · OK to finish</div>}
+      <div className="chat__resize" onPointerDown={(e) => startDrag(e, "size")} title="Drag to resize" />
+      {adjust && <div className="chat__hint">{adjust === "move" ? "Arrows move the chat" : "Arrows resize the chat"} · OK when done</div>}
     </div>
   );
 }
