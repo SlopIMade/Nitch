@@ -165,6 +165,31 @@ impl Player {
         self.sessions.lock().unwrap().get(id).map(|s| s.status.clone())
     }
 
+    /// The rendition to use for a picture `height` pixels tall: the smallest one at least that
+    /// tall (saves decoding, S3), else the largest. Audio-only renditions are skipped.
+    pub fn pick_rendition(&self, id: &str, height: u32) -> Option<usize> {
+        let sessions = self.sessions.lock().unwrap();
+        let heights: Vec<(usize, u32)> = sessions
+            .get(id)?
+            .primary
+            .variants
+            .iter()
+            .enumerate()
+            .filter_map(|(i, v)| Some((i, v.resolution.as_deref()?.split_once('x')?.1.parse().ok()?)))
+            .collect();
+        heights
+            .iter()
+            .filter(|(_, h)| *h >= height)
+            .min_by_key(|(_, h)| *h)
+            .or_else(|| heights.iter().max_by_key(|(_, h)| *h))
+            .map(|(i, _)| *i)
+    }
+
+    /// Ends a play session (e.g. a multiview tile that was removed).
+    pub fn remove(&self, id: &str) {
+        self.sessions.lock().unwrap().remove(id);
+    }
+
     /// The ad-free media playlist of rendition `index`.
     pub async fn media(&self, id: &str, index: usize) -> Result<Option<String>> {
         let Some((channel, options, url)) = self.with(id, |s| {

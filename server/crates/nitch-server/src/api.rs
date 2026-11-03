@@ -13,13 +13,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::auth::{Auth, AuthStatus};
+use crate::multiview::{self, MultiviewInfo};
 use crate::play::{PlayOptions, PlayStatus, Player};
 use crate::sessions::{self, Session, SessionInput, Template};
 use crate::store::Store;
 
 pub struct AppState {
     pub auth: Arc<Auth>,
-    pub player: Player,
+    pub player: Arc<Player>,
+    pub multiview: Arc<multiview::Manager>,
     pub store: Arc<Store>,
     pub tw: nitch_twitch::Twitch,
 }
@@ -39,6 +41,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/templates", get(session_templates))
         .route("/api/sessions/{id}", get(get_session).patch(update_session).delete(delete_session))
+        .route("/api/sessions/{id}/play", get(multiview_status).post(play_session))
+        .route("/hls/mv/{id}/{*path}", get(multiview_file))
         .route("/hls/slate.ts", get(|| slate("video/mp2t", include_bytes!("../assets/slate.ts"))))
         .route("/hls/slate-init.mp4", get(|| slate("video/mp4", include_bytes!("../assets/slate-init.mp4"))))
         .route("/hls/slate.m4s", get(|| slate("video/iso.segment", include_bytes!("../assets/slate.m4s"))))
@@ -53,6 +57,8 @@ pub enum ApiError {
     NotLoggedIn,
     NotFound(String),
     BadRequest(String),
+    /// A resource limit was reached (e.g. running multiviews).
+    Busy(String),
     Upstream(anyhow::Error),
 }
 
@@ -71,6 +77,7 @@ impl IntoResponse for ApiError {
             ApiError::NotLoggedIn => (StatusCode::UNAUTHORIZED, "not_logged_in", "log in first".to_string()),
             ApiError::NotFound(m) => (StatusCode::NOT_FOUND, "not_found", m),
             ApiError::BadRequest(m) => (StatusCode::BAD_REQUEST, "bad_request", m),
+            ApiError::Busy(m) => (StatusCode::SERVICE_UNAVAILABLE, "busy", m),
             ApiError::Upstream(e) => {
                 tracing::warn!("upstream error: {e:#}");
                 (StatusCode::BAD_GATEWAY, "upstream", format!("{e:#}"))
@@ -281,16 +288,56 @@ async fn update_session(State(s): St, Path(id): Path<String>, Json(input): Json<
     }
     session.updated_at = nitch_twitch::auth::now_unix();
     s.store.save_session(&session)?;
+    // A running pipeline follows the edit live.
+    s.multiview.apply(&session).await?;
     Ok(Json(session))
 }
 
 async fn delete_session(State(s): St, Path(id): Path<String>) -> Result<StatusCode, ApiError> {
+    s.multiview.stop(&id);
     if s.store.delete_session(&id)? {
         tracing::info!(%id, "session deleted");
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::NotFound("no such session".into()))
     }
+}
+
+/// Starts the session's multiview (or joins the running one).
+async fn play_session(State(s): St, Path(id): Path<String>) -> ApiResult<MultiviewInfo> {
+    let session = s.store.session(&id)?.ok_or_else(|| ApiError::NotFound("no such session".into()))?;
+    if session.tiles.is_empty() {
+        return Err(ApiError::BadRequest("the session has no tiles".into()));
+    }
+    let info = s.multiview.play(&session).await.map_err(|e| {
+        if e.to_string().contains("already running") { ApiError::Busy(format!("{e:#}")) } else { ApiError::Upstream(e) }
+    })?;
+    Ok(Json(info))
+}
+
+/// State of a running multiview: tiles per slot with their state (`live`, `loading`, …).
+async fn multiview_status(State(s): St, Path(id): Path<String>) -> ApiResult<MultiviewInfo> {
+    s.multiview.info(&id).map(Json).ok_or_else(|| ApiError::NotFound("not running".into()))
+}
+
+/// Playlists and segments of a running multiview, from its output directory.
+async fn multiview_file(State(s): St, Path((id, path)): Path<(String, String)>) -> Result<Response, ApiError> {
+    let safe = |p: &str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "._-".contains(c)) && p != "..";
+    let parts: Vec<&str> = path.split('/').collect();
+    if !safe(&id) || parts.len() > 2 || !parts.iter().all(|p| safe(p)) {
+        return Err(ApiError::NotFound("no such file".into()));
+    }
+    let file = s.multiview.dir(&id).join(&path);
+    let bytes = tokio::fs::read(&file).await.map_err(|_| ApiError::NotFound("no such file".into()))?;
+    let (content_type, cache) = match file.extension().and_then(|e| e.to_str()) {
+        Some("m3u8") => {
+            s.multiview.touch(&id);
+            ("application/vnd.apple.mpegurl", "no-cache")
+        }
+        Some("mp4") => ("video/mp4", "no-cache"),
+        _ => ("video/iso.segment", "max-age=60"),
+    };
+    Ok(([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache)], bytes).into_response())
 }
 
 async fn slate(content_type: &'static str, bytes: &'static [u8]) -> Response {

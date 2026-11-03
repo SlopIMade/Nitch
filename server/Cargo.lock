@@ -1523,6 +1523,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "nitch-hls",
+ "nitch-media",
  "nitch-twitch",
  "reqwest",
  "rusqlite",

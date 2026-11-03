@@ -3,6 +3,7 @@
 mod api;
 mod auth;
 mod config;
+mod multiview;
 mod play;
 mod sessions;
 mod store;
@@ -27,11 +28,37 @@ async fn main() -> Result<()> {
     let config = config::Config::from_env()?;
     let store = Arc::new(store::Store::open(&config.data_dir.join("nitch.db"))?);
     let tw = nitch_twitch::Twitch::new(config.twitch.clone())?;
+    let player = Arc::new(play::Player::new(tw.clone()));
+    let multiview =
+        multiview::Manager::new(player.clone(), &config.data_dir, config.bind.port(), config.encoder.clone(), config.max_multiview)?;
     let state = Arc::new(api::AppState {
         auth: auth::Auth::load(tw.clone(), store.clone())?,
         store,
-        player: play::Player::new(tw.clone()),
+        player,
+        multiview: multiview.clone(),
         tw,
+    });
+
+    // Housekeeping for multiview: stop idle pipelines; retry offline tiles every minute.
+    let housekeeping = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+        let mut n = 0u64;
+        loop {
+            tick.tick().await;
+            housekeeping.multiview.reap();
+            n += 1;
+            if n % 6 == 0 {
+                for id in housekeeping.multiview.with_offline_tiles() {
+                    if let Ok(Some(session)) = housekeeping.store.session(&id) {
+                        housekeeping.multiview.reset_offline(&id);
+                        if let Err(e) = housekeeping.multiview.apply(&session).await {
+                            tracing::warn!(%id, "retrying offline tiles failed: {e:#}");
+                        }
+                    }
+                }
+            }
+        }
     });
 
     // Everything that isn't API or HLS is the single-page app; unknown paths get index.html.
