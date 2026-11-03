@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Hls, { type Level } from "hls.js";
 import { api, ApiError, GRID, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
+import { claimArrows } from "../tv";
 import { usePlayer, type Target } from "./PlayerContext";
 
 type Quality = { index: number; label: string };
@@ -211,6 +212,16 @@ export function PlayerLayer() {
     if (index >= 0 && hls.audioTrack !== index) hls.audioTrack = index;
   }, [focus, sessionId, audioTracks, loading]);
 
+  // Multiview full screen: left/right switch the tile, so the arrows belong to the player.
+  useEffect(() => {
+    if (sessionId && mode === "full") return claimArrows();
+  }, [sessionId, mode]);
+
+  // The TV shell keeps the screen on while something plays.
+  useEffect(() => {
+    window.NitchTV?.setKeepScreenOn(!!target);
+  }, [target]);
+
   const slots = mv.data?.slots ?? [];
   const occupied = slots.map((s, k) => (s ? k : -1)).filter((k) => k >= 0);
 
@@ -235,7 +246,13 @@ export function PlayerLayer() {
   const live = info.data?.live;
   const title = target.kind === "channel" ? (info.data?.display_name ?? target.channel) : target.name;
   return (
-    <div className={`player player--${mode}`} onClick={mode === "mini" ? expand : undefined}>
+    <div
+      className={`player player--${mode}`}
+      onClick={mode === "mini" ? expand : undefined}
+      // The mini player is reachable with the remote: focus it, press OK to go back to full screen.
+      tabIndex={mode === "mini" ? 0 : undefined}
+      onKeyDown={mode === "mini" ? (e) => e.key === "Enter" && e.target === e.currentTarget && expand() : undefined}
+    >
       <div className="player__stage">
         <video ref={videoRef} className="player__video" playsInline />
         {sessionId && mode === "full" && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} />}

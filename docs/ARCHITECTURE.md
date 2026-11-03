@@ -124,23 +124,38 @@ Each tile uses the **same ad-handled proxy playlist** as single view, consumed i
 tile the server picks the rendition just above the tile size, e.g. 480p or 720p for a 2×2 tile. That
 saves both decoding and bandwidth.
 
-One GStreamer pipeline per running multiview session. This is the structure proven in spike S4:
+One GStreamer pipeline per running multiview session, as built in M4 (`nitch-media`, structure
+from spike S4):
 
 ```
-per tile N:
-  fallbacksrc (uri = internal ad-handled playlist, fallback-uri = slate) ─┬─► video ─► compositor.sink_N
-                                                                         │       (grid rect, keep-aspect-ratio)
-                                                                         └─► audio ─► convert/resample ─► AAC ─► audio rendition N
+per tile slot k (9 slots):
+  fallbacksrc (uri = internal play session, no slates) ─┬─► video ─► compositor.sink   (grid rect, keep-aspect-ratio)
+                                                        └─► audio ─► convert/resample ─► mixer_k
 
 pacing (live, so the clock - never a tile - drives the output):
   videotestsrc is-live, 16×16 black, zorder 0 ─► compositor
-  audiotestsrc is-live, silence               ─► every audio rendition (fallback)
+  audiotestsrc is-live, silence               ─► mixer_k (every slot, so its track never stops)
 
 output:
-  compositor ─► I420 1920×1080@30 ─► H.264 encoder (VA-API or x264) ─► profile=high ─► hlscmafsink (video)
-  audio rendition 1..N                                                             ─► hlscmafsink (one per tile)
-  server writes master.m3u8: 1 video + N audio renditions (EXT-X-MEDIA TYPE=AUDIO)
+  compositor ─► I420 ─► videorate ─► fully pinned caps ─► x264 / VA-API ─► High ─► hlscmafsink  video/
+  mixer_k ─► pinned audio caps ─► AAC                                         ─► hlscmafsink  audio{k}/
+  server writes master.m3u8: 1 video + 9 audio renditions (slot0 … slot8)
 ```
+
+- **Tile inputs are internal play sessions** (`/hls/{play}/v{n}.m3u8` on our own server), so tiles
+  get the same ad handling as single view (backup chain, D20). They run **without slates** (D22):
+  a slate's restarting timestamps left a tile black after a preroll, while a paused playlist is
+  simply bridged by `fallbacksrc`.
+- **Rendition per tile:** the smallest one at least as tall as the tile in pixels. A tile that is only
+  moved or resized keeps its source (D23), because a new rendition would restart it (~15 s black).
+- **Every audio slot always exists** (silence when empty), so the master playlist never changes while
+  the pipeline runs. Audio track `slot{k}` belongs to slot `k`; the client switches it on focus.
+- **Fully pinned caps:** the CMAF muxer refuses *any* caps change mid-stream, so after the compositor
+  every video field (format, size, rate, pixel aspect, colorimetry, chroma site) and every audio field
+  (including channel mask) is fixed. `videorate` keeps encoder timestamps strictly increasing; x264
+  aborted on a backwards jump once.
+- **"Cover" fit isn't implemented yet:** `aspectratiocrop` in front of the compositor broke
+  negotiation inside `fallbacksrc`, so cover tiles are letterboxed like "contain".
 
 - **Layout change:** set the compositor pad properties (`xpos`, `ypos`, `width`, `height`, `zorder`)
   while the pipeline runs. No restart.
@@ -150,9 +165,14 @@ output:
   3. add the new ones and call `sync_state_with_parent`
 
   The other tiles don't notice (S4).
-- **Stalls and failures** (streamer offline, network trouble, source can't start): `fallbacksrc`
-  shows that tile's slate and keeps retrying. The other tiles are not affected. Its `status`
-  (`buffering` / `running` / `retrying`) feeds the `tile_state` events.
+- **Stalls and failures** (streamer offline, network trouble, source can't start, unfillable ad):
+  `fallbacksrc` keeps the tile black and retries; the other tiles are not affected. The **client
+  draws the tile's state** over it ("Waiting for the stream…", "Ad break", "Offline"), from
+  `GET /api/sessions/{id}/play`, which combines `fallbacksrc`'s `status` with the tile's ad status.
+  A fallback image inside `fallbacksrc` failed to negotiate and kept retrying in the background, and the
+  client overlay is sharper and can be localized.
+- **A failed pipeline** (a non-tile element errors) is started fresh by the next `play`; the player
+  retries a broken multiview automatically.
 - **Pinned formats:** the raw format before the encoder (I420, 8 bit) and the H.264 profile after it are
   always set explicitly. Left to negotiation, S4 ended up with High 4:4:4 10-bit: 3× the CPU and
   unplayable in browsers. The output profile is checked in tests.
@@ -184,14 +204,16 @@ output:
   While you drag or resize, the editor draws outlines over the video immediately. The server applies
   the new layout when you let go, and the video catches up a few seconds later.
 - **Overlays in sync:** the client draws focus frames and tile labels from the same layout data.
-  A marker in the playlist (`EXT-X-DATERANGE`) tells it where in the video a new layout begins, so
-  the overlays switch together with the picture.
+  Planned, not built yet: a marker in the playlist (`EXT-X-DATERANGE`) tells it where in the video a
+  new layout begins, so the overlays switch together with the picture. Today they switch a few
+  seconds before the video.
 - **Defaults:** output 1920×1080 at 30 fps, H.264, configurable. Tiles take the rendition just above
   their size (480p for 2×2). Measured in S3: about 1.75 cores of a Ryzen 9 3900X with x264 veryfast; 60 fps output
   nearly doubles that, and 720p inputs add ~60 %.
 - **Limits:** saved sessions are unlimited, but the number of sessions **running** at once is
-  configurable, since each one costs ~2 cores in software. A running pipeline is torn down when no
-  client has fetched it for N seconds; the saved session stays.
+  configurable (`NITCH_MAX_MULTIVIEW`, default 2), since each one costs ~2 cores in software. A running
+  pipeline stops when no client has fetched its playlists for 45 s; the saved session stays.
+  Offline tiles are retried every minute.
 
 **Encoders and decoders** are probed at startup, in order: VA-API (`vah264enc` / `vah264lpenc`, `vah264dec`),
 then software (`x264enc` with a fast preset and zerolatency tuning, libav decoders). The chosen chain
@@ -330,7 +352,9 @@ REST + JSON under `/api`:
 | GET | `/api/sessions/{id}` | One session |
 | PATCH | `/api/sessions/{id}` | Rename, or change tiles; a running pipeline applies it live |
 | DELETE | `/api/sessions/{id}` | Delete a session (stops its pipeline) |
-| POST | `/api/sessions/{id}/play` | Start or join its pipeline → `{hls_url}` |
+| POST | `/api/sessions/{id}/play` | Start or join its pipeline → `{hls_url, grid, slots[]}` (slot `k` = audio track `slot{k}`) |
+| GET | `/api/sessions/{id}/play` | A running multiview's tiles with their state (`live`, `loading`, `ad`, `retrying`, `offline`) |
+| GET | `/hls/mv/{id}/…` | Its master playlist, video and audio renditions (CMAF) |
 | GET | `/api/system` | Diagnostics: encoder chain, sessions, load |
 
 WebSocket at `/api/ws`:

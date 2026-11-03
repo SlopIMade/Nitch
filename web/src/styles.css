@@ -673,3 +673,38 @@ h2 {
   border-radius: var(--radius);
   background: var(--surface);
 }
+
+/* ---------- TV mode (inside the Android TV shell, M5) ---------- */
+
+html.tv {
+  font-size: 22px;
+}
+
+html.tv :focus-visible,
+html.tv :focus {
+  outline: 4px solid #fff;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 8px rgba(145, 71, 255, 0.6);
+}
+
+html.tv .card:focus {
+  transform: scale(1.04);
+  transition: transform 0.15s;
+}
+
+/* No hover on a TV: controls show while something inside the player has focus. */
+html.tv .player__bar {
+  opacity: 0;
+}
+
+html.tv .player:focus-within .player__bar {
+  opacity: 1;
+}
+
+html.tv .tile__label {
+  opacity: 1;
+}
+
+.player--mini:focus {
+  outline: 4px solid var(--accent-2);
+}

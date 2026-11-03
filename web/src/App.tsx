@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Route, Routes } from "react-router";
 import { api } from "./api";
@@ -6,7 +7,9 @@ import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
 import { SessionEditorPage } from "./pages/SessionEditor";
 import { SessionsPage } from "./pages/Sessions";
+import { usePlayer } from "./player/PlayerContext";
 import { PlayerLayer } from "./player/PlayerLayer";
+import { installBackHandler } from "./tv";
 
 function Header() {
   const qc = useQueryClient();
@@ -50,9 +53,31 @@ function Header() {
   );
 }
 
+/** The TV remote's Back key: the topmost thing closes first (modal, full-screen player). */
+function BackKey() {
+  const { target, mode, minimize } = usePlayer();
+  useEffect(
+    () =>
+      installBackHandler(() => {
+        if (document.querySelector(".modal")) {
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+          return true;
+        }
+        if (target && mode === "full") {
+          minimize();
+          return true;
+        }
+        return false;
+      }),
+    [target, mode, minimize],
+  );
+  return null;
+}
+
 export function App() {
   return (
     <>
+      <BackKey />
       <Header />
       <main>
         <Routes>

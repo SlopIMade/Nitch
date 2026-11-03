@@ -5,6 +5,9 @@ import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { PlayerProvider } from "./player/PlayerContext";
 import "./styles.css";
+import { installSpatialNavigation } from "./tv";
+
+installSpatialNavigation();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },

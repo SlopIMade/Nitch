@@ -8,6 +8,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { api, GRID, type Tile } from "../api";
 import { ChannelPicker } from "../components/ChannelPicker";
 import { usePlayer } from "../player/PlayerContext";
+import { claimArrows } from "../tv";
 
 type EditorTile = { channel: string | null; x: number; y: number; w: number; h: number; z: number };
 type Drag = { index: number; mode: "move" | "resize"; sx: number; sy: number; start: EditorTile; free: boolean };
@@ -60,7 +61,12 @@ export function SessionEditorPage() {
   };
   const toFront = (i: number) => update(i, (t) => ({ ...t, z: Math.max(0, ...(tiles ?? []).map((o) => o.z)) + 1 }));
 
-  // Keyboard editing (also the way to edit with a TV remote later).
+  // While a tile is selected, the arrows move it instead of the focus.
+  useEffect(() => {
+    if (selected !== null && picking === null) return claimArrows();
+  }, [selected, picking]);
+
+  // Keyboard editing (also the way to edit with a TV remote).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (selected === null || picking !== null || (e.target as HTMLElement).tagName === "INPUT") return;

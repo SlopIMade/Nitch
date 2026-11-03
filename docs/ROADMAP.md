@@ -89,25 +89,38 @@ playback resumes on its own. ✓ (with simulated ads)
 
 - [x] Sessions stored on the server (SQLite), unlimited: CRUD API, tiles in 60×60 grid cells,
   validation (inside the grid, max 9 tiles), templates
-- Pipeline manager: one actor per **running** session, shared by every device that opens it;
-  add / replace / remove tiles and change layouts at runtime; a slate per tile
-- `session_updated` events so all devices watching a session follow edits
-- Per-tile audio renditions + master playlist; audio switching on the client
-- Encoder/decoder probing (VA-API → software), diagnostics endpoint
-- Limit on running sessions, idle teardown (the saved session stays)
-- Web: session list (create from template, rename, duplicate, delete), tile focus (audio), swap/remove tiles
-- Grid editor:
-  - templates as a starting point
-  - add streams and place/resize them on the grid with mouse and with the TV remote (snap to cells)
-  - outline preview while editing
-- Layout-change markers in the playlist, so client overlays switch in sync with the video
+- [x] Pipeline manager (`nitch-media` + `multiview.rs`): one pipeline per **running** session, shared by
+  every device that opens it; tiles added / replaced / moved / removed at runtime
+- [x] Tiles read internal play sessions (ad handling for tiles too), without slates (D22)
+- [x] Per-tile audio renditions (9 slots) + master playlist; audio switching on the client
+- [x] Encoder choice: `NITCH_ENCODER=x264|va` (VA-API falls back to x264 if missing)
+- [x] Limit on running sessions, idle teardown after 45 s, failed pipelines restarted, offline
+  tiles retried every minute
+- [x] Web: session list (play, edit, delete, new from template), tile labels and states, focus +
+  audio on click or ← →
+- [x] Grid editor: templates as a starting point, add streams, drag/resize with snapping (16:9 lock,
+  Shift for free), keyboard editing, selected tile's actions in the toolbar
+- [x] Docker image with GStreamer (x264, libav, VA drivers)
+- [ ] `session_updated` events, so all devices watching a session follow edits (with the WebSocket, M6)
+- [ ] Layout-change markers in the playlist, so overlays switch exactly with the video (today they switch a few
+  seconds early)
+- [ ] "Cover" fit (crop to fill); seamless rendition upgrade when a tile grows a lot
+- [ ] Diagnostics endpoint (encoder, CPU per pipeline)
+- [ ] TV-remote editing (M5) and the hour-long stability run on the target (M8)
+
+Tested on 2026-11-03 in the browser:
+- a 2×2 of four live channels, including a tile that started in a preroll
+- audio switching to another tile (only that tile's audio track is loaded)
+- editing while playing (resize + "To front")
+- a live layout change via `PATCH`: 14.1 s of video in 14 s, 0 stalls
+- resizing keeps the tile's picture
 
 **Done when:**
-- 2×2 runs stable for an hour on the target
-- layout and tile changes don't interrupt the output
-- audio switching is instant
-- tiles can be placed and resized on desktop and with the TV remote
-- a session edited on the desktop opens on the TV with the identical layout
+- 2×2 runs stable for an hour on the target (M8)
+- layout and tile changes don't interrupt the output ✓
+- audio switching is instant ✓
+- tiles can be placed and resized on desktop ✓ and with the TV remote (M5)
+- a session edited on the desktop opens on the TV with the identical layout (M5)
 
 ## M5 — Android TV
 

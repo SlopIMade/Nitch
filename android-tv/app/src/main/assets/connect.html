@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nitch – connect</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0e0e12; color: #ececf1;
+         font: 22px system-ui, sans-serif; }
+  main { width: min(720px, 90vw); }
+  h1 { color: #a970ff; margin: 0 0 8px; }
+  .muted { color: #9a9aad; }
+  .error { color: #ff6b6b; }
+  button, input { font: inherit; border-radius: 8px; border: 0; padding: 14px 18px; }
+  button { background: #24242e; color: #ececf1; width: 100%; text-align: left; margin: 6px 0; }
+  button.primary { background: #9147ff; text-align: center; }
+  input { width: 100%; box-sizing: border-box; background: #18181f; color: #ececf1; border: 2px solid #24242e; }
+  :focus { outline: 4px solid #fff; outline-offset: 3px; }
+  .row { display: flex; gap: 12px; margin-top: 8px; }
+  .row input { flex: 1; } .row button { width: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Nitch</h1>
+  <p class="muted">Choose your Nitch server.</p>
+  <p id="error" class="error"></p>
+  <div id="servers"><p class="muted">Searching the network…</p></div>
+  <p class="muted">Or enter its address (on the emulator: 10.0.2.2:8080):</p>
+  <div class="row">
+    <input id="address" placeholder="192.168.1.10:8080" autocomplete="off">
+    <button class="primary" id="connect">Connect</button>
+  </div>
+</main>
+<script>
+  const err = new URLSearchParams(location.search).get("error");
+  if (err) document.getElementById("error").textContent = err;
+
+  const connect = (url) => window.NitchTV && window.NitchTV.connect(url);
+  document.getElementById("connect").onclick = () => {
+    const v = document.getElementById("address").value.trim();
+    if (v) connect(v);
+  };
+  document.getElementById("address").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("connect").click();
+  });
+
+  // Called by the shell whenever mDNS finds a server.
+  window.nitchServers = (list) => {
+    const box = document.getElementById("servers");
+    box.innerHTML = "";
+    if (!list.length) { box.innerHTML = '<p class="muted">No server found yet.</p>'; return; }
+    for (const s of list) {
+      const b = document.createElement("button");
+      b.textContent = s.name;
+      b.onclick = () => connect(s.url);
+      box.appendChild(b);
+    }
+    if (!document.activeElement || document.activeElement === document.body) box.firstChild.focus();
+  };
+  window.NitchTV && window.NitchTV.servers();
+
+  // Remote: up/down move between the controls; Back on this page leaves the app.
+  const focusables = () => [...document.querySelectorAll("button, input")];
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const list = focusables();
+    const i = list.indexOf(document.activeElement);
+    const next = list[(i + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length];
+    next.focus();
+    e.preventDefault();
+  });
+  window.addEventListener("nitch:back", () => window.NitchTV && window.NitchTV.exit());
+  focusables()[0].focus();
+</script>
+</body>
+</html>

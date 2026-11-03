@@ -3,6 +3,7 @@
 mod api;
 mod auth;
 mod config;
+mod discovery;
 mod multiview;
 mod play;
 mod sessions;
@@ -68,6 +69,14 @@ async fn main() -> Result<()> {
     }
     let spa = ServeDir::new(&config.web_dir).fallback(ServeFile::new(index));
     let app = api::router(state).fallback_service(spa).layer(TraceLayer::new_for_http());
+
+    // Discovery for the TV app; optional (NITCH_MDNS=0 turns it off, and it may fail without multicast).
+    let _announcement = match std::env::var("NITCH_MDNS").as_deref() {
+        Ok("0") => None,
+        _ => discovery::announce(config.bind.port())
+            .map_err(|e| tracing::warn!("mDNS announcement unavailable: {e:#}"))
+            .ok(),
+    };
 
     let listener = tokio::net::TcpListener::bind(config.bind).await?;
     tracing::info!("listening on http://{}", config.bind);

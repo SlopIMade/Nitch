@@ -190,3 +190,25 @@ The repository is pushed to `SlopIMade/Nitch`, a **private** repo the user creat
 the default branch. Before the first push, the whole history was scanned: no credentials, tokens,
 signed Twitch URLs or session IDs. Raw recordings (`data/`) and `.env` stay git-ignored.
 Replaces "local git only" from D9. CI comes in M7.
+
+### D22 — Multiview tiles run without slates; the client draws tile states
+*2026-11-03*
+
+Tile inputs are internal play sessions (so tiles get the backup chain, D20), but **without slates**:
+- In the browser test, a tile that started in a preroll stayed black after the break. The slate
+  segments' restarting timestamps confused its timeline in the compositor.
+- Without slates, the tile's playlist simply pauses while no source is ad-free, and `fallbacksrc`
+  bridges the gap.
+
+The state of each tile (waiting, ad break, reconnecting, offline) is drawn by the client over the
+video, from `GET /api/sessions/{id}/play`. A fallback image inside `fallbacksrc` failed to negotiate
+and kept retrying in the background.
+Refines D15 (which still holds for single view in the browser).
+
+### D23 — A moved or resized tile keeps its source
+*2026-11-03*
+
+Each new tile gets the rendition just above its pixel size. A tile that is only moved or resized
+keeps its source and rendition: switching the rendition restarts the tile's source, which left it
+black for ~15 s in the test. A seamless upgrade (start the better rendition hidden, swap when it
+runs) is noted for later.

@@ -9,6 +9,7 @@ anyhow = "1.0.104"
 axum = "0.8.9"
 dotenvy = "0.15.7"
 futures = { version = "0.3.34", default-features = false, features = ["std", "async-await"] }
+mdns-sd = "0.21.7"
 nitch-hls = { version = "0.1.0", path = "../nitch-hls" }
 nitch-media = { version = "0.1.0", path = "../nitch-media" }
 nitch-twitch = { version = "0.1.0", path = "../nitch-twitch" }
