@@ -151,6 +151,12 @@ impl Multiview {
         let _ = std::fs::remove_dir_all(&cfg.dir);
         std::fs::create_dir_all(&cfg.dir)?;
         let pipeline = gst::Pipeline::new();
+        // Paced by the wall clock, not the monotonic one (D26): under WSL2 the monotonic clock ran
+        // ~7 % slow, so the output fell behind real time, players stalled and latency grew without
+        // bound. The wall clock is kept right by time sync; its occasional small steps forward
+        // only make the output catch up in a burst, which the players' buffers absorb.
+        let clock = gst::glib::Object::builder::<gst::SystemClock>().property("clock-type", gst::ClockType::Realtime).build();
+        pipeline.use_clock(Some(&clock));
 
         // ---- video ----
         let comp = gst::ElementFactory::make("compositor")
@@ -194,6 +200,8 @@ impl Multiview {
                 .property_from_str("tune", "zerolatency")
                 .property("bitrate", cfg.video_kbps)
                 .property("key-int-max", (cfg.fps * 2) as u32)
+                // Keyframes only every 2 s, never on scene cuts: even 2 s segments.
+                .property("option-string", "scenecut=0")
                 .build()?,
             Encoder::Va => gst::ElementFactory::make("vah264enc")
                 .property("bitrate", cfg.video_kbps)

@@ -151,7 +151,14 @@ export function PlayerLayer() {
             return video.play();
           });
         if (Hls.isSupported()) {
-          const hls = new Hls({ liveSyncDurationCount: 3, lowLatencyMode: false });
+          const hls = new Hls({
+            liveSyncDurationCount: 3,
+            lowLatencyMode: false,
+            // Never drift away from live: after a stall, play up to 8 % faster until back at
+            // the target distance; beyond 8 segments, jump.
+            maxLiveSyncPlaybackRate: 1.08,
+            liveMaxLatencyDurationCount: 8,
+          });
           hlsRef.current = hls;
           hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
             // This device's quality limit (Settings): cap automatic switching at that height.

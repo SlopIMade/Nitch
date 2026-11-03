@@ -231,3 +231,20 @@ It was reproduced in about 1 of 20 test runs, and can't be caught in Rust. Each 
 runs in its own process (`nitch-server multiview-worker`), controlled with JSON lines over stdin/stdout.
 A crash ends only that pipeline, and it is restarted while someone watches.
 Tested by sending `SIGSEGV` to a worker: the server kept answering, and a new worker took over in ~10 s.
+
+## D26 — Multiview pipelines run on the wall clock
+
+**Context:** In a live multiview, playback stuttered (~50 ms every few seconds) and the delay grew
+to minutes. Measured: the output carried only ~0.93 s of media per real second. Under WSL2 the
+monotonic clock, which GStreamer uses by default, ran ~7 % slow; WSL corrects the wall clock by
+stepping it ~2.9 s forward every ~35 s. Players on other machines play in real time, so they ran
+dry again and again.
+
+**Decision:** The multiview pipeline uses a `GstSystemClock` with `clock-type=realtime`. On a
+normal Linux host both clocks run at the same rate, so nothing changes there; where the monotonic
+clock drifts, the output still keeps real time. A forward step of the wall clock just makes the
+pipeline produce the missed frames in a burst, which the players' buffers absorb. hls.js also
+catches up on its own (`maxLiveSyncPlaybackRate` 1.08, jump beyond 8 segments), so a stall can
+never add lasting delay.
+
+**Measured after the change:** 1.0000 s of media per second over 2 minutes.
