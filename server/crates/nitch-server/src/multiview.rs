@@ -10,11 +10,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, bail};
-use nitch_media::{Config, Encoder, Multiview, TileSpec};
+use nitch_media::{Config, Encoder, TileSpec};
 use serde::Serialize;
 
 use crate::play::{FilledBy, PlayOptions, Player};
 use crate::sessions::{Fit, GRID, MAX_TILES, Session, Tile};
+use crate::worker::Worker;
 
 pub const WIDTH: i32 = 1920;
 pub const HEIGHT: i32 = 1080;
@@ -56,7 +57,8 @@ struct SlotTile {
 }
 
 struct Running {
-    mv: Multiview,
+    /// The pipeline, in its own process (crash isolation).
+    mv: Worker,
     slots: Vec<Option<SlotTile>>,
     last_access: Instant,
 }
@@ -137,7 +139,7 @@ impl Manager {
                 if running.len() >= self.max_running {
                     bail!("{} multiviews are already running (limit {})", running.len(), self.max_running);
                 }
-                let mv = Multiview::start(Config {
+                let mv = Worker::start(Config {
                     dir: self.dir(&session.id),
                     width: WIDTH,
                     height: HEIGHT,
@@ -290,19 +292,31 @@ impl Manager {
         }
     }
 
-    /// Stops idle pipelines and restarts failed ones; run periodically.
+    /// Stops pipelines nobody watches anymore; run periodically.
     pub fn reap(&self) {
         let idle: Vec<String> = self
             .running
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, r)| r.last_access.elapsed() > IDLE || r.mv.failure().is_some())
+            .filter(|(_, r)| r.last_access.elapsed() > IDLE)
             .map(|(id, _)| id.clone())
             .collect();
         for id in idle {
             self.stop(&id);
         }
+    }
+
+    /// Sessions whose pipeline failed (e.g. the worker crashed) while someone is still watching;
+    /// the housekeeping task restarts them.
+    pub fn failed_but_watched(&self) -> Vec<String> {
+        self.running
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, r)| r.mv.failure().is_some() && r.last_access.elapsed() < IDLE)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// Ids of running sessions whose offline tiles may have come online (retried periodically).

@@ -8,6 +8,7 @@ mod multiview;
 mod play;
 mod sessions;
 mod store;
+mod worker;
 
 use std::sync::Arc;
 
@@ -16,8 +17,22 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+fn main() -> Result<()> {
+    // A multiview pipeline in its own process (see worker.rs); logs go to stderr, stdout is
+    // the status channel to the server.
+    if std::env::args().nth(1).as_deref() == Some(worker::SUBCOMMAND) {
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_ansi(false)
+            .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+            .init();
+        return worker::run();
+    }
+    server()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn server() -> Result<()> {
     tracing_subscriber::fmt()
         // Colors only on a terminal, not in `docker logs` or log files.
         .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
@@ -48,6 +63,16 @@ async fn main() -> Result<()> {
         loop {
             tick.tick().await;
             housekeeping.multiview.reap();
+            // A crashed pipeline that's still being watched comes back on its own.
+            for id in housekeeping.multiview.failed_but_watched() {
+                if let Ok(Some(session)) = housekeeping.store.session(&id) {
+                    tracing::warn!(%id, "multiview pipeline failed, restarting it");
+                    housekeeping.multiview.stop(&id);
+                    if let Err(e) = housekeeping.multiview.play(&session).await {
+                        tracing::warn!(%id, "restarting the multiview failed: {e:#}");
+                    }
+                }
+            }
             n += 1;
             if n % 6 == 0 {
                 for id in housekeeping.multiview.with_offline_tiles() {

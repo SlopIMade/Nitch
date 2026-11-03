@@ -217,6 +217,16 @@ export function PlayerLayer() {
     if (sessionId && mode === "full") return claimArrows();
   }, [sessionId, mode]);
 
+  // The remote's Play/Pause key (sent by the TV shell).
+  useEffect(() => {
+    const toggle = () => {
+      const v = videoRef.current;
+      if (v) void (v.paused ? v.play() : v.pause());
+    };
+    window.addEventListener("nitch:playpause", toggle);
+    return () => window.removeEventListener("nitch:playpause", toggle);
+  }, []);
+
   // The TV shell keeps the screen on while something plays.
   useEffect(() => {
     window.NitchTV?.setKeepScreenOn(!!target);

@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result, bail};
 use gst::prelude::*;
 use gstreamer as gst;
+use serde::{Deserialize, Serialize};
 
 /// Registers GStreamer and the statically linked Rust plugins. Safe to call repeatedly.
 pub fn init() -> Result<()> {
@@ -43,7 +44,7 @@ pub fn init() -> Result<()> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Encoder {
     /// Software, always available.
     X264 { preset: String },
@@ -65,7 +66,7 @@ impl Encoder {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Output directory; gets `video/`, `audio{k}/` and `master.m3u8`.
     pub dir: PathBuf,
@@ -79,7 +80,7 @@ pub struct Config {
 }
 
 /// A tile's source and place, in output pixels.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileSpec {
     pub uri: String,
     pub x: i32,

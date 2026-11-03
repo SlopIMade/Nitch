@@ -15,7 +15,7 @@ use nitch_hls::Master;
 use nitch_hls::media::{MediaPlaylist, parse_media};
 use nitch_hls::timeline::{Origin, Slates, Timeline};
 use nitch_twitch::Twitch;
-use nitch_twitch::playback::PRIMARY_PLAYER_TYPE;
+use nitch_twitch::playback::{PRIMARY_PLAYER_TYPE, Unavailable};
 use serde::Serialize;
 use url::Url;
 
@@ -24,6 +24,8 @@ const IDLE: Duration = Duration::from_secs(10 * 60);
 /// Backup sources in priority order. `embed` got its ads at other times than `site` in S1; the
 /// others add independent sessions so that some source is ad-free as often as possible.
 pub const BACKUP_PLAYER_TYPES: &[&str] = &["embed", "popout", "autoplay", "frontpage"];
+/// After Twitch reported the channel offline, wait this long before asking again.
+const OFFLINE_BACKOFF: Duration = Duration::from_secs(15);
 /// After a backup failed to resolve, wait this long before trying it again.
 const BACKUP_RETRY: Duration = Duration::from_secs(30);
 
@@ -98,6 +100,8 @@ struct PlaySession {
     status: PlayStatus,
     /// Start of the current ad break in stream time (the playlist window's start moves on).
     break_from: Option<i64>,
+    /// Set when Twitch reported the channel offline; requests until then fail fast.
+    offline_until: Option<Instant>,
     last_access: Instant,
 }
 
@@ -153,6 +157,7 @@ impl Player {
                 backups,
                 timeline: Timeline::with_slates(slates),
                 break_from: None,
+                offline_until: None,
                 last_access: Instant::now(),
             },
         );
@@ -239,12 +244,28 @@ impl Player {
         index: usize,
         url: Url,
     ) -> Result<MediaPlaylist> {
+        // The channel went offline a moment ago: don't ask Twitch again on every retry.
+        if self.with(id, |s| s.offline_until.filter(|t| Instant::now() < *t)).is_some() {
+            return Err(Unavailable::Offline.into());
+        }
         let (status, text) = self.tw.get_text(&url).await?;
         if status.is_success() {
             return parse_media(&text, &url);
         }
         tracing::info!(%channel, %status, "media playlist rejected, resolving the channel again");
-        let master = self.tw.master_playlist(channel, &options.player_type).await?;
+        let master = match self.tw.master_playlist(channel, &options.player_type).await {
+            Ok(m) => m,
+            Err(e) => {
+                if e.downcast_ref::<Unavailable>().is_some() {
+                    tracing::info!(%channel, "channel offline, checking again in {}s", OFFLINE_BACKOFF.as_secs());
+                    self.with(id, |s| {
+                        s.offline_until = Some(Instant::now() + OFFLINE_BACKOFF);
+                        Some(())
+                    });
+                }
+                return Err(e);
+            }
+        };
         let url = master.variants.get(index).context("rendition disappeared")?.uri.clone();
         self.with(id, |s| {
             s.primary = master;

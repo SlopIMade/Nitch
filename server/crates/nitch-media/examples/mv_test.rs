@@ -37,7 +37,9 @@ fn main() -> anyhow::Result<()> {
     if keep {
         std::mem::forget(mv);
     } else {
+        println!("STOPPING");
         mv.stop();
+        println!("STOPPED");
     }
     Ok(())
 }

@@ -1553,6 +1553,7 @@ dependencies = [
  "gst-plugin-fmp4",
  "gst-plugin-hlssink3",
  "gstreamer 0.25.4",
+ "serde",
  "tracing",
  "tracing-subscriber",
 ]

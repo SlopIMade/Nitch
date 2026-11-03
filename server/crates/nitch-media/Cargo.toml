@@ -10,6 +10,7 @@ gst-plugin-fallbackswitch = "0.15.4"
 gst-plugin-fmp4 = "0.14.5"
 gst-plugin-hlssink3 = "0.15.4"
 gstreamer = "0.25.4"
+serde = { version = "1.0.229", features = ["derive"] }
 tracing = "0.1.44"
 
 [dev-dependencies]
