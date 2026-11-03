@@ -2,9 +2,10 @@
 // long press of Left on the remote or the menu button (mouse). For the remote, OK on a stream
 // watches it alone, a long press of OK (or the + button) adds it to the view.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, formatViewers } from "../api";
+import { Icon } from "../components/Icon";
 import { installBackHandler, pressKind } from "../tv";
 import { CHAT_PLACES, channelColor, resetChat, updateChat, useChatSettings, type ChatMode } from "./chatSettings";
 import type { ChatAdjust } from "./ChatOverlay";
@@ -44,14 +45,14 @@ function Entry({
       </button>
       {onLong && (
         <button className="menu-entry__side" onClick={onLong} disabled={disabled} title={longLabel} aria-label={longLabel}>
-          {longLabel === "Remove" ? "✕" : "+"}
+          <Icon name={longLabel === "Remove" ? "trash" : "plus"} />
         </button>
       )}
     </div>
   );
 }
 
-type Stream = { login: string; name: string; sub: string; live: boolean };
+type Stream = { login: string; name: string; sub: string; live: boolean; viewers?: number };
 
 function StreamList({
   title,
@@ -79,7 +80,14 @@ function StreamList({
           longLabel="Add to this view"
         >
           <strong>{s.name}</strong>
-          <span className="menu-entry__sub">{s.live ? s.sub : "offline"}</span>
+          <span className="menu-entry__sub">
+            {s.live ? s.sub : "offline"}
+            {s.viewers !== undefined && (
+              <span className="menu-entry__viewers">
+                <Icon name="viewers" /> {formatViewers(s.viewers)}
+              </span>
+            )}
+          </span>
         </Entry>
       ))}
     </section>
@@ -124,10 +132,10 @@ function AddTab({
     .map((c) => ({ login: c.login, name: c.display_name, sub: c.game, live: c.is_live }))
     .filter(notInView);
   const recommended: Stream[] = tagInfo.flatMap((t) =>
-    t.data?.live ? [{ login: t.data.login, name: t.data.display_name, sub: t.data.live.game, live: true }] : [],
+    t.data?.live ? [{ login: t.data.login, name: t.data.display_name, sub: t.data.live.game, live: true, viewers: t.data.live.viewers }] : [],
   );
   const followed: Stream[] = (follows.data ?? [])
-    .map((s) => ({ login: s.login, name: s.display_name, sub: s.game, live: true }))
+    .map((s) => ({ login: s.login, name: s.display_name, sub: s.game, live: true, viewers: s.viewers }))
     .filter(notInView)
     .filter((s) => !recommended.some((r) => r.login === s.login));
 
@@ -135,7 +143,7 @@ function AddTab({
     <>
       <input className="input sidemenu__search" placeholder="Search channels" value={text} onChange={(e) => setText(e.target.value)} />
       <p className="sidemenu__hint">
-        OK: watch alone · hold OK or <b>+</b>: add to this view{full ? " (full)" : ""}
+        OK: watch alone · hold OK or <Icon name="plus" />: add to this view{full ? " (full)" : ""}
       </p>
       {q && <StreamList title="Search results" streams={found} onWatch={onWatch} onAdd={onAdd} canAdd={!full} />}
       {q && results.data?.length === 0 && <p className="muted">No channels found.</p>}
@@ -207,6 +215,16 @@ function ChatTab({ all, onAdjust }: { all: string[]; onAdjust: (a: ChatAdjust) =
           <span className="stepper__value">{Math.round(s.font * 100)} %</span>
           <button className="btn btn--ghost btn--small" onClick={() => updateChat((o) => ({ font: o.font + 0.05 }))}>
             A+
+          </button>
+        </div>
+        <div className="stepper">
+          <span>Text opacity</span>
+          <button className="btn btn--ghost btn--small" onClick={() => updateChat((o) => ({ text: o.text - 0.1 }))}>
+            −
+          </button>
+          <span className="stepper__value">{Math.round(s.text * 100)} %</span>
+          <button className="btn btn--ghost btn--small" onClick={() => updateChat((o) => ({ text: o.text + 0.1 }))}>
+            +
           </button>
         </div>
         <div className="stepper">
@@ -282,26 +300,41 @@ export function SideMenu(props: {
     };
   }, [onClose]);
 
-  // Focus: the first stream (or chat option), so the remote can start right away.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const first = box.current?.querySelector<HTMLElement>(".sidemenu__body button:not(:disabled)");
-      (first ?? box.current?.querySelector<HTMLElement>(".sidemenu__tab--on"))?.focus();
-    }, 50);
-    return () => clearTimeout(t);
+  // The focus belongs in the menu: on opening, on switching tabs, and whenever it got lost (a
+  // list that loaded late, an entry that went away), it goes to the first entry.
+  const focusFirst = () => {
+    const first = box.current?.querySelector<HTMLElement>(".sidemenu__body button:not(:disabled)");
+    (first ?? box.current?.querySelector<HTMLElement>(".sidemenu__tab--on"))?.focus();
+  };
+  // Until the user moves, the focus follows the first entry (lists load in after opening).
+  const moved = useRef(false);
+  useLayoutEffect(() => {
+    moved.current = false;
+    focusFirst();
   }, [tab]);
+  useEffect(() => {
+    if (!moved.current || !box.current?.contains(document.activeElement)) focusFirst();
+  });
 
   return (
-    <div className="sidemenu" ref={box} onClick={(e) => e.stopPropagation()}>
+    <div
+      className="sidemenu"
+      ref={box}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        if (e.key.startsWith("Arrow")) moved.current = true;
+      }}
+      onPointerDown={() => (moved.current = true)}
+    >
       <div className="sidemenu__tabs">
         <button className={`sidemenu__tab${tab === "add" ? " sidemenu__tab--on" : ""}`} onClick={() => onTab("add")}>
-          Streams
+          <Icon name="plus" /> Streams
         </button>
         <button className={`sidemenu__tab${tab === "chat" ? " sidemenu__tab--on" : ""}`} onClick={() => onTab("chat")}>
-          Chat
+          <Icon name="chat" /> Chat
         </button>
-        <button className="sidemenu__close" onClick={onClose} title="Close (Back)">
-          ✕
+        <button className="btn btn--ghost btn--icon sidemenu__close" onClick={onClose} title="Close (Back)">
+          <Icon name="close" />
         </button>
       </div>
       <div className="sidemenu__body">

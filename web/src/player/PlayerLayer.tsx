@@ -10,15 +10,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router";
 import Hls, { type Level } from "hls.js";
-import { api, ApiError, GRID, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
+import { api, ApiError, formatViewers, GRID, type ChannelInfo, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
+import { Icon } from "../components/Icon";
+import { LayoutCanvas } from "../components/LayoutCanvas";
 import { addTile, removeTile } from "../layout";
 import { claimArrows, focusWithin, pressKind } from "../tv";
 import { setChatChannels } from "./chat";
 import { ChatOverlay, type ChatAdjust } from "./ChatOverlay";
 import { QUALITY_KEY } from "../pages/Settings";
 import { usePlayer, type Target } from "./PlayerContext";
+import { LayoutBar, useLayoutEdit } from "./LayoutEdit";
 import { SideMenu, type MenuTab } from "./SideMenu";
 
 const MAX_TILES = 9;
@@ -64,13 +66,28 @@ const STATE_TEXT: Record<SlotInfo["state"], string | null> = {
   offline: "Offline",
 };
 
-/** Labels, states and the focus frame over the multiview video, positioned on the grid. */
-function TileOverlay({ slots, focus, onFocus }: { slots: (SlotInfo | null)[]; focus: number; onFocus: (k: number) => void }) {
+/**
+ * Labels, states and the focus frame over the multiview video, positioned on the grid. A tile is
+ * an area; its 16:9 picture is centered in it, and the frame and label sit on the picture.
+ */
+function TileOverlay({
+  slots,
+  focus,
+  onFocus,
+  info,
+}: {
+  slots: (SlotInfo | null)[];
+  focus: number;
+  onFocus: (k: number) => void;
+  info: (channel: string) => ChannelInfo | undefined;
+}) {
   const pct = (n: number) => `${(n / GRID) * 100}%`;
   return (
     <div className="tiles">
-      {slots.map((s, k) =>
-        s ? (
+      {slots.map((s, k) => {
+        if (!s) return null;
+        const viewers = info(s.channel)?.live?.viewers;
+        return (
           <button
             key={k}
             className={`tile${k === focus ? " tile--focus" : ""}`}
@@ -82,14 +99,22 @@ function TileOverlay({ slots, focus, onFocus }: { slots: (SlotInfo | null)[]; fo
             tabIndex={-1}
             title={`${s.channel}: click for its audio`}
           >
-            <span className="tile__label">
-              {s.channel}
-              {k === focus && " 🔊"}
+            <span className="tile__picture">
+              <span className="tile__label">
+                {k === focus && <Icon name="sound" />}
+                <span className="tile__name">{info(s.channel)?.display_name ?? s.channel}</span>
+                {viewers !== undefined && (
+                  <span className="tile__viewers">
+                    <Icon name="viewers" />
+                    {formatViewers(viewers)}
+                  </span>
+                )}
+              </span>
+              {STATE_TEXT[s.state] && <span className="tile__state">{STATE_TEXT[s.state]}</span>}
             </span>
-            {STATE_TEXT[s.state] && <span className="tile__state">{STATE_TEXT[s.state]}</span>}
           </button>
-        ) : null,
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -124,7 +149,6 @@ function useShownSlots(slots: (SlotInfo | null)[] | undefined, hls: Hls | null):
 
 export function PlayerLayer() {
   const { target, play, playSession, stop } = usePlayer();
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -142,6 +166,7 @@ export function PlayerLayer() {
   const [chatAdjust, setChatAdjust] = useState<ChatAdjust>(null);
   const [controls, setControls] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   // Bumped to start a broken multiview again (the server restarts a failed pipeline).
   const [attempt, setAttempt] = useState(0);
   const key = targetKey(target);
@@ -171,6 +196,7 @@ export function PlayerLayer() {
     queries: inView.map((login) => ({ queryKey: ["channel", login], queryFn: () => api.channel(login), refetchInterval: 60_000 })),
   });
   const titles = infos.flatMap((q) => (q.data?.live ? [q.data.live.title] : []));
+  const infoOf = (login: string) => infos[inView.indexOf(login)]?.data;
   const focusedChannel = channel ?? slots[focus]?.channel ?? null;
 
   // Chat of everything in view is read (and kept) while the player is open.
@@ -354,7 +380,7 @@ export function PlayerLayer() {
   const adjustDone = useCallback(() => setChatAdjust(null), []);
 
   // ← → switch the tile, holding ← opens the menu. Only while the focus isn't in the controls.
-  const playerKeys = !!target && !menu && !chatAdjust;
+  const playerKeys = !!target && !menu && !chatAdjust && !editing;
   useEffect(() => {
     if (!playerKeys) return;
     const inControls = () => focusWithin(".player__bar");
@@ -397,6 +423,8 @@ export function PlayerLayer() {
 
   const tiles = session.data?.tiles ?? [];
   const full = !!sessionId && tiles.length >= MAX_TILES;
+  const edit = useLayoutEdit(sessionId, tiles, editing);
+  useEffect(() => setEditing(false), [key]);
 
   const add = async (login: string) => {
     setMenu(null);
@@ -444,20 +472,30 @@ export function PlayerLayer() {
 
   if (!target) return null;
 
-  const info = infos[0]?.data;
-  const live = channel ? info?.live : null;
-  const title = target.kind === "channel" ? (info?.display_name ?? target.channel) : target.name;
+  // Single view: the channel. Multiview: the session, and the focused tile's stream below.
+  const shown = channel ? infos[0]?.data : focusedChannel ? infoOf(focusedChannel) : undefined;
+  const live = shown?.live;
+  const title = target.kind === "channel" ? (shown?.display_name ?? target.channel) : target.name;
   return (
     <div
-      className={`player${controls || menu ? " player--controls" : ""}`}
+      className={`player${controls || menu || editing ? " player--controls" : ""}${editing ? " player--editing" : ""}`}
       onMouseMove={poke}
       onClick={() => menu && closeMenu()}
     >
       <div className="player__stage">
         <video ref={videoRef} className="player__video" playsInline />
-        {sessionId && ready && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} />}
+        {sessionId && ready && !editing && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} info={infoOf} />}
+        {editing && (
+          <LayoutCanvas
+            className="layout-canvas--live"
+            tiles={edit.tiles}
+            selected={edit.selected}
+            onSelect={edit.setSelected}
+            onChange={edit.change}
+          />
+        )}
       </div>
-      {activeKey && (
+      {activeKey && !editing && (
         <ChatOverlay
           focused={focusedChannel}
           all={inView}
@@ -472,38 +510,58 @@ export function PlayerLayer() {
       {channel && ready && <AdBadge ad={status.data?.ad ?? null} hls={hlsRef.current} />}
 
       {/* The bottom bar comes first: with nothing focused, the remote's arrows start there. */}
-      <div className="player__bar player__bar--bottom">
-        <button className="btn btn--ghost" onClick={() => openMenu("add")} title="Add streams (hold ← on the remote)">
-          ＋ Streams
-        </button>
-        <button className="btn btn--ghost" onClick={() => openMenu("chat")}>
-          Chat
-        </button>
-        <button className="btn btn--ghost" onClick={() => setMuted((m) => !m)}>
-          {muted ? "Unmute" : "Mute"}
-        </button>
-        {channel && qualities.length > 0 && (
-          <select className="select" value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
-            <option value={-1}>Auto</option>
-            {qualities.map((q) => (
-              <option key={q.index} value={q.index}>
-                {q.label}
-              </option>
-            ))}
-          </select>
-        )}
-        <span className="player__keys">{sessionId ? "← → tile · hold ← menu" : "hold ← menu"}</span>
-      </div>
+      {editing ? (
+        <LayoutBar edit={edit} onAddStream={() => openMenu("add")} onRemove={remove} onDone={() => setEditing(false)} />
+      ) : (
+        <div className="player__bar player__bar--bottom">
+          <button className="btn btn--ghost" onClick={() => openMenu("add")} title="Add streams (hold ← on the remote)">
+            <Icon name="plus" /> Streams
+          </button>
+          <button className="btn btn--ghost" onClick={() => openMenu("chat")}>
+            <Icon name="chat" /> Chat
+          </button>
+          {sessionId && (
+            <button className="btn btn--ghost" onClick={() => setEditing(true)}>
+              <Icon name="layout" /> Layout
+            </button>
+          )}
+          <button className="btn btn--ghost btn--icon" onClick={() => setMuted((m) => !m)} title={muted ? "Unmute" : "Mute"}>
+            <Icon name={muted ? "mute" : "sound"} />
+          </button>
+          {channel && qualities.length > 0 && (
+            <select className="select" value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
+              <option value={-1}>Auto</option>
+              {qualities.map((q) => (
+                <option key={q.index} value={q.index}>
+                  {q.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="player__keys">{sessionId ? "← → switch tile · hold ← menu" : "hold ← menu"}</span>
+        </div>
+      )}
 
       <div className="player__bar player__bar--top">
-        <button className="btn btn--ghost" onClick={stop} title="Back (Esc)">
-          ← Back
+        <button className="btn btn--ghost btn--icon" onClick={stop} title="Back (Esc)">
+          <Icon name="back" />
         </button>
         <div className="player__title">
-          <strong>{title}</strong>
-          {live && <span className="muted"> · {live.game}</span>}
+          <div className="player__headline">
+            <strong>{title}</strong>
+            {sessionId && focusedChannel && (
+              <span className="player__focus">
+                <Icon name="sound" /> {shown?.display_name ?? focusedChannel}
+              </span>
+            )}
+            {live && <span className="muted">{live.game}</span>}
+            {live && (
+              <span className="player__viewers">
+                <Icon name="viewers" /> {formatViewers(live.viewers)}
+              </span>
+            )}
+          </div>
           {live && <div className="player__subtitle">{live.title}</div>}
-          {sessionId && slots[focus] && <div className="player__subtitle">Audio: {slots[focus]!.channel}</div>}
         </div>
       </div>
       {menu && (
@@ -523,8 +581,8 @@ export function PlayerLayer() {
           onEditLayout={
             sessionId
               ? () => {
-                  stop();
-                  navigate(`/multiview/${sessionId}`);
+                  closeMenu();
+                  setEditing(true);
                 }
               : null
           }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes } from "react-router";
 import { api } from "./api";
+import { Icon } from "./components/Icon";
 import { HomePage } from "./pages/Home";
 import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
@@ -28,10 +29,14 @@ function Header() {
       <span className="logo">Nitch</span>
       <nav className="nav">
         <NavLink to="/" end>
-          Home
+          <Icon name="layout" /> Home
         </NavLink>
-        <NavLink to="/search">Search</NavLink>
-        <NavLink to="/settings">Settings</NavLink>
+        <NavLink to="/search">
+          <Icon name="search" /> Search
+        </NavLink>
+        <NavLink to="/settings">
+          <Icon name="settings" /> Settings
+        </NavLink>
       </nav>
       <div className="header__user">
         {auth.data?.state === "logged_in" ? (
@@ -39,7 +44,7 @@ function Header() {
             <img className="avatar avatar--small" src={auth.data.user.profile_image_url} alt="" />
             <span>{auth.data.user.display_name}</span>
             <button className="btn btn--ghost btn--small" onClick={() => logout.mutate()}>
-              Log out
+              <Icon name="logout" /> Log out
             </button>
           </>
         ) : (

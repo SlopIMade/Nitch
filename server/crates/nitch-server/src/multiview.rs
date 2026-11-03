@@ -147,6 +147,7 @@ impl Manager {
                     video_kbps: VIDEO_KBPS,
                     slots: MAX_TILES,
                     encoder: self.encoder.clone(),
+                    clock_rate: nitch_media::clock::measured_rate(),
                 })?;
                 tracing::info!(id = %session.id, name = %session.name, "multiview started");
                 running.insert(
@@ -225,7 +226,9 @@ impl Manager {
                 // its source, so the picture isn't interrupted.
                 let uri = kept_uri.or_else(|| {
                     let id = play_id.as_ref()?;
-                    let rendition = self.player.pick_rendition(id, h as u32)?;
+                    // The picture is 16:9 inside the tile's area (letterboxed when the area isn't).
+                    let video_h = h.min(w * 9 / 16);
+                    let rendition = self.player.pick_rendition(id, video_h as u32)?;
                     Some(format!("{}/hls/{id}/v{rendition}.m3u8", self.base))
                 });
                 let spec = uri.clone().map(|uri| TileSpec { uri, x, y, w, h, z: tile.z, cover: tile.fit == Fit::Cover });

@@ -12,13 +12,16 @@ export type ChatSettings = {
   h: number;
   /** Text size in rem. */
   font: number;
+  /** Background opacity. */
   opacity: number;
+  /** Text opacity. */
+  text: number;
   /** Channels left out of the combined chat. */
   exclude: string[];
 };
 
 const KEY = "nitch.chat.v2";
-export const CHAT_DEFAULTS: ChatSettings = { mode: "focused", x: 76, y: 4, w: 22, h: 70, font: 0.85, opacity: 0.45, exclude: [] };
+export const CHAT_DEFAULTS: ChatSettings = { mode: "focused", x: 76, y: 4, w: 22, h: 70, font: 0.85, opacity: 0.45, text: 1, exclude: [] };
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const round = (v: number) => Math.round(v * 100) / 100;
 
@@ -43,6 +46,7 @@ export function updateChat(patch: Partial<ChatSettings> | ((s: ChatSettings) => 
   n.y = clamp(n.y, 0, 100 - n.h);
   n.font = round(clamp(n.font, 0.5, 2.5));
   n.opacity = round(clamp(n.opacity, 0, 0.95));
+  n.text = round(clamp(n.text, 0.3, 1));
   current = n;
   localStorage.setItem(KEY, JSON.stringify(n));
   listeners.forEach((l) => l());

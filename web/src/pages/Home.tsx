@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import { api, type Session } from "../api";
+import { Icon } from "../components/Icon";
 import { LayoutPreview } from "../components/LayoutPreview";
 import { StreamCard } from "../components/StreamCard";
 import { usePlayer } from "../player/PlayerContext";
@@ -20,7 +21,7 @@ function DeleteButton({ onDelete }: { onDelete: () => void }) {
   }, [armed]);
   return (
     <button className={`btn btn--small ${armed ? "btn--danger" : "btn--ghost"}`} onClick={() => (armed ? onDelete() : setArmed(true))}>
-      {armed ? "Really delete?" : "Delete"}
+      <Icon name="trash" /> {armed ? "Really delete?" : "Delete"}
     </button>
   );
 }
@@ -36,7 +37,7 @@ function SessionCard({ s, onDelete }: { s: Session; onDelete: () => void }) {
         <div className="card__title">{s.name}</div>
         <div className="row row--left">
           <Link className="btn btn--ghost btn--small" to={`/multiview/${s.id}`}>
-            Edit
+            <Icon name="edit" /> Edit
           </Link>
           <DeleteButton onDelete={onDelete} />
         </div>
@@ -76,7 +77,9 @@ export function HomePage() {
                 <LayoutPreview rects={t.rects} />
               </div>
               <div className="card__body">
-                <div className="card__title">＋ {t.name}</div>
+                <div className="card__title">
+                  <Icon name="plus" /> {t.name}
+                </div>
               </div>
             </button>
           ))}

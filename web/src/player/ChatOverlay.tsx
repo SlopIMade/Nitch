@@ -9,6 +9,7 @@ import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react
 import { claimArrows, installBackHandler } from "../tv";
 import { parts, useChatMessages } from "./chat";
 import { channelColor, updateChat, useChatSettings, type ChatSettings } from "./chatSettings";
+import { Icon } from "../components/Icon";
 
 export type ChatAdjust = "move" | "size" | null;
 
@@ -112,18 +113,18 @@ export function ChatOverlay({
     >
       <div className="chat__bg" style={{ opacity: s.opacity }} />
       <div className="chat__grip" onPointerDown={(e) => startDrag(e, "move")} title="Drag to move">
-        {!mixed && channels[0] && <span className="chat__title">{channels[0]}</span>}
+        <span className="chat__title">{channels.join(" · ")}</span>
         <button
           className="chat__gear"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={onSettings}
-          title="Chat settings"
+          title="Chat settings (size, place, opacity)"
           tabIndex={-1}
         >
-          ⚙
+          <Icon name="settings" />
         </button>
       </div>
-      <div className="chat__list" ref={list}>
+      <div className="chat__list" ref={list} style={{ opacity: s.text }}>
         {channels.length === 0 && <div className="chat__empty">Chat is off.</div>}
         {messages.map((m) => (
           <div key={m.seq} className="chat__line" style={mixed ? { borderLeftColor: channelColor(m.channel) } : undefined}>

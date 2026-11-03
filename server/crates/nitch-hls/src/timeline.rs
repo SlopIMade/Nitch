@@ -21,6 +21,8 @@ use crate::time::format_pdt;
 
 /// Segments in the output playlist.
 pub const WINDOW: usize = 15;
+/// Seconds behind the live edge a multiview tile starts (playlists without slates).
+const TILE_HOLD_BACK: f64 = 4.0;
 /// Entries kept in memory (older ones are pruned).
 const KEEP: usize = 90;
 /// Two segment times closer than this are the same segment.
@@ -260,6 +262,11 @@ impl Timeline {
         writeln!(out, "#EXT-X-TARGETDURATION:{}", max_duration.ceil() as u64).unwrap();
         writeln!(out, "#EXT-X-MEDIA-SEQUENCE:{}", first_seq.unwrap_or(self.next_seq)).unwrap();
         writeln!(out, "#EXT-X-DISCONTINUITY-SEQUENCE:{disc_seq}").unwrap();
+        if !self.slates {
+            // Multiview tiles (GStreamer's hlsdemux2): start two segments behind the live edge
+            // instead of the default three target durations, which shortens the delay.
+            writeln!(out, "#EXT-X-SERVER-CONTROL:HOLD-BACK={TILE_HOLD_BACK:.1}").unwrap();
+        }
         out.push_str(&body);
         out
     }

@@ -68,6 +68,14 @@ class MainActivity : Activity() {
         val query = if (error != null) "?error=" + android.net.Uri.encode(error) else ""
         web.loadUrl("file:///android_asset/connect.html$query")
         startDiscovery()
+        // Couldn't reach the saved server (network not up yet, server restarting): keep trying it
+        // while the connect page is shown, so the app recovers on its own.
+        if (error != null) web.postDelayed(::retrySaved, RETRY_MS)
+    }
+
+    private fun retrySaved() {
+        val server = prefs.getString(KEY_SERVER, null) ?: return
+        if (web.url?.startsWith("file:///android_asset/connect.html") == true) web.loadUrl(server)
     }
 
     // ---------- remote keys ----------
@@ -175,6 +183,7 @@ class MainActivity : Activity() {
     companion object {
         const val SERVICE_TYPE = "_nitch._tcp"
         const val KEY_SERVER = "server"
+        const val RETRY_MS = 5_000L
         const val BuildConfigVersion = "0.1.0"
     }
 }

@@ -1,5 +1,6 @@
 import { formatViewers, type LiveStream } from "../api";
 import { usePlayer } from "../player/PlayerContext";
+import { Icon } from "./Icon";
 
 export function StreamCard({ stream }: { stream: LiveStream }) {
   const { play } = usePlayer();
@@ -8,7 +9,10 @@ export function StreamCard({ stream }: { stream: LiveStream }) {
       <div className="card__thumb">
         <img src={stream.thumbnail_url} alt="" loading="lazy" />
         <span className="badge badge--live">LIVE</span>
-        <span className="badge badge--viewers">{formatViewers(stream.viewers)}</span>
+        <span className="badge badge--viewers">
+          <Icon name="viewers" />
+          {formatViewers(stream.viewers)}
+        </span>
       </div>
       <div className="card__body">
         <div className="card__title">{stream.title}</div>

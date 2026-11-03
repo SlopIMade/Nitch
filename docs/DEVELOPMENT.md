@@ -109,7 +109,7 @@ Credentials first: copy `.env.example` to `.env` and fill in the Twitch app's Cl
 
   You may also need to allow port 8080 in the Windows firewall. On the target VM none of this applies.
 - **Clock under WSL:** the monotonic clock in WSL2 can run several percent slow. Multiview
-  pipelines therefore use the wall clock ([D26](DECISIONS.md#d26--multiview-pipelines-run-on-the-wall-clock)).
+  pipelines therefore run on a clock calibrated to the wall clock's rate ([D26](DECISIONS.md#d26--multiview-pipelines-keep-real-time-on-a-calibrated-clock)).
 - **Encoding on this PC:** software x264 only. WSL exposes the GPU as `/dev/dxg` but has no
   `/dev/dri`, and GStreamer's VA plugin needs `/dev/dri`. That's fine: the 3900X has plenty of
   headroom, and the GPU path that matters has to be verified on the target VM anyway.

@@ -45,6 +45,8 @@ async fn server() -> Result<()> {
         .init();
 
     let config = config::Config::from_env()?;
+    // The pipeline clock's rate (D26), measured from the start so new multiviews get it right away.
+    nitch_media::clock::start_measuring();
     let store = Arc::new(store::Store::open(&config.data_dir.join("nitch.db"))?);
     let tw = nitch_twitch::Twitch::new(config.twitch.clone())?;
     let player = Arc::new(play::Player::new(tw.clone()));

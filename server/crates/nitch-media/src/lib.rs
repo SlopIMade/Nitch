@@ -14,6 +14,8 @@
 //! Every slot always has an audio rendition (silence when empty), so the master playlist never
 //! changes while the pipeline runs.
 
+pub mod clock;
+
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,6 +79,13 @@ pub struct Config {
     /// Number of tile slots (and audio renditions).
     pub slots: usize,
     pub encoder: Encoder,
+    /// Wall-clock rate per monotonic second, as measured by the server so far (see `clock`).
+    #[serde(default = "one")]
+    pub clock_rate: f64,
+}
+
+fn one() -> f64 {
+    1.0
 }
 
 /// A tile's source and place, in output pixels.
@@ -136,14 +145,18 @@ fn cmaf_sink(dir: &Path) -> Result<gst::Element> {
         .property("location", p("segment%05d.m4s"))
         .property("init-location", p("init%05d.mp4"))
         .property("playlist-location", p("index.m3u8"))
-        .property("target-duration", 2u32)
-        .property("playlist-length", 6u32)
-        .property("max-files", 15u32)
+        // 1 s segments: players can stay closer to the live edge.
+        .property("target-duration", SEGMENT_SECONDS)
+        .property("playlist-length", 8u32)
+        .property("max-files", 20u32)
         .property("enable-program-date-time", true)
         .build()?)
 }
 
 const LIVE_LATENCY: u64 = 500_000_000;
+/// Output segment length; every segment starts with a keyframe.
+const SEGMENT_SECONDS: u32 = 1;
+
 
 impl Multiview {
     pub fn start(cfg: Config) -> Result<Self> {
@@ -151,12 +164,7 @@ impl Multiview {
         let _ = std::fs::remove_dir_all(&cfg.dir);
         std::fs::create_dir_all(&cfg.dir)?;
         let pipeline = gst::Pipeline::new();
-        // Paced by the wall clock, not the monotonic one (D26): under WSL2 the monotonic clock ran
-        // ~7 % slow, so the output fell behind real time, players stalled and latency grew without
-        // bound. The wall clock is kept right by time sync; its occasional small steps forward
-        // only make the output catch up in a burst, which the players' buffers absorb.
-        let clock = gst::glib::Object::builder::<gst::SystemClock>().property("clock-type", gst::ClockType::Realtime).build();
-        pipeline.use_clock(Some(&clock));
+        pipeline.use_clock(Some(&clock::steady_wall_clock(cfg.clock_rate)));
 
         // ---- video ----
         let comp = gst::ElementFactory::make("compositor")
@@ -199,13 +207,13 @@ impl Multiview {
                 .property_from_str("speed-preset", preset)
                 .property_from_str("tune", "zerolatency")
                 .property("bitrate", cfg.video_kbps)
-                .property("key-int-max", (cfg.fps * 2) as u32)
+                .property("key-int-max", (cfg.fps * SEGMENT_SECONDS as i32) as u32)
                 // Keyframes only every 2 s, never on scene cuts: even 2 s segments.
                 .property("option-string", "scenecut=0")
                 .build()?,
             Encoder::Va => gst::ElementFactory::make("vah264enc")
                 .property("bitrate", cfg.video_kbps)
-                .property("key-int-max", (cfg.fps * 2) as u32)
+                .property("key-int-max", (cfg.fps * SEGMENT_SECONDS as i32) as u32)
                 .build()?,
         };
         let h264_caps = gst::ElementFactory::make("capsfilter")

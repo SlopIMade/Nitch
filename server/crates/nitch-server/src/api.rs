@@ -157,6 +157,8 @@ async fn system(State(s): St) -> Json<serde_json::Value> {
     Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "uptime_seconds": s.started.elapsed().as_secs(),
+        // Wall-clock rate per monotonic second (D26); 1.0 on a well-behaved host.
+        "clock_rate": nitch_media::clock::measured_rate(),
         "multiview": s.multiview.diagnostics(),
         "play_sessions": s.player.diagnostics(),
         "chat_channels": s.chat.channels(),

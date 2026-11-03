@@ -131,6 +131,20 @@ export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string, on
   return null;
 }
 
+// After a long press, the remote keeps repeating the key until it's released. Those repeats
+// belong to the press: they must not reach whatever has the focus once the long press acted
+// (a closed menu would otherwise reopen from the button that got the focus).
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (press?.fired && press.key === e.key) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  },
+  true,
+);
+
 // A key released where no handler asked (e.g. the long press opened a menu that took over):
 // forget the press after the handlers had their turn.
 window.addEventListener("keyup", (e) => {

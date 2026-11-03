@@ -232,23 +232,28 @@ runs in its own process (`nitch-server multiview-worker`), controlled with JSON 
 A crash ends only that pipeline, and it is restarted while someone watches.
 Tested by sending `SIGSEGV` to a worker: the server kept answering, and a new worker took over in ~10 s.
 
-### D26 — Multiview pipelines run on the wall clock
+### D26 — Multiview pipelines keep real time on a calibrated clock
 *2026-11-03*
 
-In a live multiview, playback stuttered (~50 ms every few seconds) and the delay grew
-to minutes. Measured: the output carried only ~0.93 s of media per real second. Under WSL2 the
-monotonic clock, which GStreamer uses by default, ran ~7 % slow; WSL corrects the wall clock by
-stepping it ~2.9 s forward every ~35 s. Players on other machines play in real time, so they ran
-dry again and again.
+In a live multiview, playback stuttered (~50 ms every few seconds) and the delay grew to minutes.
+Measured: the output carried only ~0.93 s of media per real second. Under WSL2 the monotonic
+clock, which GStreamer uses by default, ran ~8 % slow; WSL corrects the wall clock by stepping
+it ~2.9 s forward every ~35 s. Players on other machines play in real time, so they ran dry again
+and again.
 
-The multiview pipeline uses a `GstSystemClock` with `clock-type=realtime`. On a
-normal Linux host both clocks run at the same rate, so nothing changes there; where the monotonic
-clock drifts, the output still keeps real time. A forward step of the wall clock just makes the
-pipeline produce the missed frames in a burst, which the players' buffers absorb. hls.js also
-catches up on its own (`maxLiveSyncPlaybackRate` 1.08, jump beyond 8 segments), so a stall can
-never add lasting delay.
+First fix: the wall clock (`clock-type=realtime`) as the pipeline clock. The rate was right, but
+every step left 1.5–2.5 s of silence in all audio tracks at once: the mixers raced ahead while
+the tiles' audio arrived "late" and was dropped.
 
-Measured after the change: 1.0000 s of media per second over 2 minutes.
+The decision (`nitch-media/src/clock.rs`): the pipeline clock is the monotonic clock, calibrated
+to the wall clock's rate. The rate is the least-squares slope of wall time over monotonic time
+over the last 5 minutes, which averages the steps out. The server measures it from its start
+(`/api/system` shows `clock_rate`, 1.09 on the dev PC) and hands it to every new pipeline, which
+keeps refining it. On a normal Linux host the rate is 1.0 and nothing changes. hls.js also catches
+up on its own (`maxLiveSyncPlaybackRate` 1.08, jump beyond 8 segments), so a stall can never add
+lasting delay.
+
+Measured after the change: 1.00 s of media per second, no gaps in any audio track.
 
 ### D27 — The player is full screen only, with a side menu instead of pages
 *2026-11-03*
@@ -271,3 +276,29 @@ places for one thing, and the remote could only switch tiles. Now:
   only sporadically and never sets `repeat`.
 
 This replaces the mini player part of D14; the player still never unmounts on navigation.
+
+### D28 — Delay: 1 s output segments, tiles start 4 s behind live
+*2026-11-03*
+
+The multiview showed about 20 s of delay: Twitch's own (a few seconds), each tile's demuxer
+starting three segments (~6 s) behind the live edge, the compositor (0.5 s), 2 s output segments,
+and the player staying three segments (6 s) behind the end of our output.
+
+- Output segments are 1 s (a keyframe every second), so the player stays ~3 s behind.
+- The tiles' playlists carry `#EXT-X-SERVER-CONTROL:HOLD-BACK=4.0`, which `hlsdemux2` honors: it
+  starts two Twitch segments behind the edge.
+
+Measured: the player sits 3 s behind the output's edge (was ~6–8 s). Expected total: ~12–14 s.
+Further steps if needed: Twitch's prefetch segments for the tiles, a shorter player distance.
+
+### D29 — Layouts are edited in the player; tiles are areas
+*2026-11-03*
+
+Editing a running multiview used to leave the player. Now "Layout" (bottom bar or side menu) turns
+the tiles into editable outlines over the running picture; every change is saved and applied live,
+and the audio keeps playing. With the remote: pick a tile (‹ ›), "Move" or "Resize" hands it the
+arrows until OK. The editor page remains for new sessions.
+
+A tile is now an area of any shape; its 16:9 picture is centered inside (the compositor's
+`keep-aspect-ratio`). Free shapes are the default, Shift keeps 16:9, "16:9" shrinks an area to
+its picture. A tile's source rendition follows the picture's height, not the area's.

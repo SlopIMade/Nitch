@@ -17,6 +17,7 @@ fn main() -> anyhow::Result<()> {
         video_kbps: 6000,
         slots: 4,
         encoder: Encoder::X264 { preset: "veryfast".into() },
+        clock_rate: 1.0,
     })?;
     // 2×2 on the 60×60 grid: 30×30 cells = 960×540 px.
     for (k, uri) in uris.iter().enumerate().take(4) {
