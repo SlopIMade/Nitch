@@ -15,18 +15,25 @@ declare global {
   }
 }
 
-let claims = 0;
+type Claim = (e: KeyboardEvent) => boolean;
+const claims = new Set<Claim>();
 
-/** While claimed, arrow keys are left to the claiming component. Returns the release function. */
-export function claimArrows(): () => void {
-  claims++;
-  let released = false;
+/**
+ * While claimed, arrow keys are left to the claiming component. `when` narrows the claim (e.g.
+ * only left/right, only while the focus isn't in the chat). Returns the release function.
+ */
+export function claimArrows(when: Claim = () => true): () => void {
+  const claim: Claim = (e) => when(e);
+  claims.add(claim);
   return () => {
-    if (!released) {
-      released = true;
-      claims--;
-    }
+    claims.delete(claim);
   };
+}
+
+/** True if the focus is inside one of `selectors` (e.g. the chat or the player's control bar). */
+export function focusWithin(...selectors: string[]): boolean {
+  const el = document.activeElement;
+  return !!el && selectors.some((s) => el.closest(s));
 }
 
 const FOCUSABLE = "button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex='-1'])";
@@ -104,7 +111,7 @@ export function installSpatialNavigation() {
   if (isTv) document.documentElement.classList.add("tv");
   window.addEventListener("keydown", (e) => {
     const dir = KEYS[e.key];
-    if (!dir || e.defaultPrevented || claims > 0) return;
+    if (!dir || e.defaultPrevented || [...claims].some((c) => c(e))) return;
     const el = document.activeElement as HTMLElement | null;
     // Inside text fields, left/right move the caret.
     if (el && el.tagName === "INPUT" && (dir === "left" || dir === "right")) return;

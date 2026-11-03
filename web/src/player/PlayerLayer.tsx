@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Hls, { type Level } from "hls.js";
 import { api, ApiError, GRID, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
-import { claimArrows } from "../tv";
+import { claimArrows, focusWithin } from "../tv";
+import { ChatOverlay } from "./ChatOverlay";
 import { usePlayer, type Target } from "./PlayerContext";
 
 type Quality = { index: number; label: string };
@@ -212,9 +213,11 @@ export function PlayerLayer() {
     if (index >= 0 && hls.audioTrack !== index) hls.audioTrack = index;
   }, [focus, sessionId, audioTracks, loading]);
 
-  // Multiview full screen: left/right switch the tile, so the arrows belong to the player.
+  // Multiview full screen: left/right switch the tile (unless the focus is in the chat or the
+  // controls, which up/down reach through the normal navigation).
   useEffect(() => {
-    if (sessionId && mode === "full") return claimArrows();
+    if (sessionId && mode === "full")
+      return claimArrows((e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && !focusWithin(".chat", ".player__bar"));
   }, [sessionId, mode]);
 
   // The remote's Play/Pause key (sent by the TV shell).
@@ -241,7 +244,12 @@ export function PlayerLayer() {
     if (mode !== "full" || !target) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") minimize();
-      if (sessionId && occupied.length > 0 && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      if (
+        sessionId &&
+        occupied.length > 0 &&
+        (e.key === "ArrowRight" || e.key === "ArrowLeft") &&
+        !focusWithin(".chat", ".player__bar")
+      ) {
         const i = Math.max(0, occupied.indexOf(focus));
         const next = (i + (e.key === "ArrowRight" ? 1 : occupied.length - 1)) % occupied.length;
         setFocus(occupied[next]);
@@ -266,6 +274,12 @@ export function PlayerLayer() {
       <div className="player__stage">
         <video ref={videoRef} className="player__video" playsInline />
         {sessionId && mode === "full" && <TileOverlay slots={slots} focus={focus} onFocus={setFocus} />}
+        {mode === "full" && (
+          <ChatOverlay
+            focused={channel ?? slots[focus]?.channel ?? null}
+            all={channel ? [channel] : slots.flatMap((s) => (s ? [s.channel] : []))}
+          />
+        )}
       </div>
       {loading && <div className="player__status">{sessionId ? "Starting the multiview…" : "Loading…"}</div>}
       {error && <div className="player__status player__status--error">{error}</div>}

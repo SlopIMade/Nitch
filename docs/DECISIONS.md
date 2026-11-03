@@ -212,3 +212,22 @@ Each new tile gets the rendition just above its pixel size. A tile that is only 
 keeps its source and rendition: switching the rendition restarts the tile's source, which left it
 black for ~15 s in the test. A seamless upgrade (start the better rendition hidden, swap when it
 runs) is noted for later.
+
+### D24 — Geometric spatial navigation instead of Norigin
+*2026-11-03*
+
+For the TV remote, the arrow keys move the browser focus to the nearest focusable element in that
+direction (`web/src/tv.ts`). Every existing button, link and input works without wrapping
+components, which Norigin (D3) would have required on every screen. Components that use the arrows
+themselves (the multiview tile focus, the grid editor, chat adjustment) claim them, optionally
+only for some keys or while the focus is elsewhere.
+**Rejected:** Norigin Spatial Navigation, which means a rewrite of every screen for a UI this simple.
+
+### D25 — Multiview pipelines run in worker processes
+*2026-11-03*
+
+A segfault in native code (GStreamer/plugins) when tiles' streams ended took down the whole server.
+It was reproduced in about 1 of 20 test runs, and can't be caught in Rust. Each pipeline therefore
+runs in its own process (`nitch-server multiview-worker`), controlled with JSON lines over stdin/stdout.
+A crash ends only that pipeline, and it is restarted while someone watches.
+Tested by sending `SIGSEGV` to a worker: the server kept answering, and a new worker took over in ~10 s.

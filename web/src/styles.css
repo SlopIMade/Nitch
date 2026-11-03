@@ -708,3 +708,149 @@ html.tv .tile__label {
 .player--mini:focus {
   outline: 4px solid var(--accent-2);
 }
+
+/* ---------- chat overlay (M6) ---------- */
+
+.chat {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.chat--off {
+  top: auto;
+  bottom: 70px;
+  right: 18px;
+  opacity: 0;
+}
+
+.player:hover .chat--off,
+.player:focus-within .chat--off {
+  opacity: 1;
+}
+
+.chat__bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: var(--radius);
+  background: #000;
+}
+
+.chat--adjusting {
+  outline: 3px dashed var(--accent-2);
+}
+
+.chat__header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  cursor: move;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.chat:hover .chat__header,
+.chat:focus-within .chat__header,
+.chat--adjusting .chat__header,
+html.tv .chat__header {
+  opacity: 1;
+}
+
+.chat__mode {
+  padding: 2px 4px;
+  font-size: 12px;
+  max-width: 140px;
+}
+
+.chat__btn {
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat__btn--on {
+  background: var(--accent);
+}
+
+.chat__channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 6px 4px;
+  font-size: 12px;
+}
+
+.chat__chip {
+  padding: 1px 8px;
+  border: 2px solid;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat__chip--off {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.chat__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 10px 10px;
+  overflow-wrap: anywhere;
+  scrollbar-width: none;
+}
+
+.chat__line {
+  padding: 2px 0 2px 6px;
+  border-left: 3px solid transparent;
+  line-height: 1.35;
+}
+
+.chat__name {
+  font-weight: 700;
+}
+
+.chat__emote {
+  height: 1.6em;
+  vertical-align: middle;
+  margin: -0.25em 1px;
+}
+
+.chat__empty {
+  color: var(--muted);
+}
+
+.chat__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.5) 50%);
+}
+
+.chat__hint {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--accent);
+  font-size: 12px;
+}

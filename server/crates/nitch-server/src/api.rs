@@ -20,6 +20,7 @@ use crate::store::Store;
 
 pub struct AppState {
     pub auth: Arc<Auth>,
+    pub chat: Arc<crate::chat::ChatHub>,
     pub player: Arc<Player>,
     pub multiview: Arc<multiview::Manager>,
     pub store: Arc<Store>,
@@ -31,6 +32,7 @@ type St = State<Arc<AppState>>;
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route("/api/ws", get(websocket))
         .route("/api/auth", get(auth_status).delete(logout))
         .route("/api/auth/device", post(start_login))
         .route("/api/follows/live", get(follows_live))
@@ -338,6 +340,73 @@ async fn multiview_file(State(s): St, Path((id, path)): Path<(String, String)>) 
         _ => ("video/iso.segment", "max-age=60"),
     };
     Ok(([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, cache)], bytes).into_response())
+}
+
+// ---------- WebSocket: chat (M6), later more events ----------
+
+/// Most channels one client may follow at once (a full multiview).
+const MAX_CHAT_CHANNELS: usize = 9;
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ClientEvent {
+    /// The chats this client shows now (replaces the previous set).
+    ChatSubscribe { channels: Vec<String> },
+}
+
+#[derive(Serialize)]
+struct ChatEvent<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    #[serde(flatten)]
+    msg: &'a crate::chat::ChatMessage,
+}
+
+async fn websocket(State(s): St, ws: axum::extract::ws::WebSocketUpgrade) -> Response {
+    ws.on_upgrade(move |socket| websocket_client(socket, s))
+}
+
+async fn websocket_client(socket: axum::extract::ws::WebSocket, s: Arc<AppState>) {
+    use axum::extract::ws::Message;
+    use futures::{SinkExt, StreamExt};
+    use std::collections::HashSet;
+
+    let (mut tx, mut rx) = socket.split();
+    let mut messages = s.chat.messages();
+    let mut subscribed: HashSet<String> = HashSet::new();
+    loop {
+        tokio::select! {
+            incoming = rx.next() => match incoming {
+                Some(Ok(Message::Text(text))) => {
+                    let Ok(ClientEvent::ChatSubscribe { channels }) = serde_json::from_str(&text) else { continue };
+                    let wanted: HashSet<String> =
+                        channels.iter().map(|c| c.to_lowercase()).take(MAX_CHAT_CHANNELS).collect();
+                    for c in subscribed.difference(&wanted) {
+                        s.chat.unsubscribe(c);
+                    }
+                    for c in wanted.difference(&subscribed) {
+                        s.chat.subscribe(c);
+                    }
+                    subscribed = wanted;
+                }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            },
+            msg = messages.recv() => match msg {
+                Ok(m) if subscribed.contains(&m.channel) => {
+                    let Ok(json) = serde_json::to_string(&ChatEvent { kind: "chat", msg: &m }) else { continue };
+                    if tx.send(Message::text(json)).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                _ => {}
+            },
+        }
+    }
+    for c in &subscribed {
+        s.chat.unsubscribe(c);
+    }
 }
 
 async fn slate(content_type: &'static str, bytes: &'static [u8]) -> Response {

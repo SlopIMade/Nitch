@@ -59,7 +59,7 @@ function BackKey() {
   useEffect(
     () =>
       installBackHandler(() => {
-        if (document.querySelector(".modal")) {
+        if (document.querySelector(".modal, .chat--adjusting")) {
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
           return true;
         }

@@ -2,6 +2,7 @@
 
 mod api;
 mod auth;
+mod chat;
 mod config;
 mod discovery;
 mod multiview;
@@ -49,6 +50,7 @@ async fn server() -> Result<()> {
         multiview::Manager::new(player.clone(), &config.data_dir, config.bind.port(), config.encoder.clone(), config.max_multiview)?;
     let state = Arc::new(api::AppState {
         auth: auth::Auth::load(tw.clone(), store.clone())?,
+        chat: chat::ChatHub::start(),
         store,
         player,
         multiview: multiview.clone(),

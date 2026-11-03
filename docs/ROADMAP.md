@@ -124,26 +124,34 @@ Tested on 2026-11-03 in the browser:
 
 ## M5 — Android TV
 
-- 10-foot UI pass: focus styles, spatial navigation on every screen, Back key handling
-- Kotlin shell: WebView, Leanback launcher + banner, key mapping, keep screen on, cleartext LAN only
-- Server discovery: mDNS + manual entry
-- Search with the system on-screen keyboard
-- Testing: Android TV emulator + a real device
+- [x] 10-foot UI: TV mode (larger type, strong focus rings, controls visible while focused),
+  geometric spatial navigation on every screen (D24), Back key handling, focusable mini player
+- [x] Kotlin shell: WebView, Leanback launcher + banner, Back/Play-Pause keys, keep screen on, cleartext
+- [x] Server discovery: mDNS (`_nitch._tcp`, announced by the server) + manual entry
+- [ ] **Build the APK** in Android Studio (Gradle can't run in my sandbox; see `android-tv/README.md`)
+- [ ] Testing: Android TV emulator + a real device (search with the on-screen keyboard, editing with
+  the remote)
 
-**Needs from you:** which Android TV device(s) you use.
+**Needs from you:** building the APK once in Android Studio, and which Android TV device(s) you use.
 **Done when:** the whole app is usable with nothing but the TV remote.
 
 ## M6 — Chat overlay (read-only)
 
-- Anonymous IRC reader on the server, fanned out over the WebSocket
-- Overlay over the video with a slightly transparent background (opacity adjustable), Twitch emotes
-  and badges
-- Modes: off, focused stream, or combined (one merged window, lines tagged by channel, channels selectable)
-- Move, resize and font size (zoom), with the mouse and with the TV remote; saved per device
-- All chat changes apply live, from the player's quick menu or from settings, without interrupting playback
+- [x] Anonymous IRC-over-WebSocket reader on the server, one connection, channels reference-counted,
+  fanned out over `/api/ws`
+- [x] Overlay over the video with a slightly transparent background (opacity adjustable), Twitch emotes
+- [x] Modes: off, focused stream, or combined (one merged window, a color stripe per channel,
+  channels switchable as chips)
+- [x] Move and resize with the mouse (header, corner) or with "Move"/"Size" + arrows (remote);
+  font size with A−/A+ or Ctrl + wheel; saved per device
+- [x] All chat changes apply live, without interrupting playback
+- [ ] Badges as icons (Helix chat badges); third-party emotes (backlog)
+
+Tested on 2026-11-03 in the browser: single view chat (40 lines in 10 s, emotes), moving with
+the arrows, font size, saved settings, and the combined chat in a running multiview.
 
 **Done when:** while a multiview keeps playing, you can switch between off, focused and combined, and
-move, resize and zoom the chat.
+move, resize and zoom the chat. ✓
 
 ## M7 — Polish & operations
 
