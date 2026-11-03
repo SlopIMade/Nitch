@@ -20,6 +20,9 @@ use tower_http::set_header::SetResponseHeader;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+/// At most this many followed channels are read in the background for chat history.
+const MAX_PINNED_CHATS: usize = 50;
+
 fn main() -> Result<()> {
     // A multiview pipeline in its own process (see worker.rs); logs go to stderr, stdout is
     // the status channel to the server.
@@ -92,6 +95,28 @@ async fn server() -> Result<()> {
                         }
                     }
                 }
+            }
+        }
+    });
+
+    // Chat history: read the followed live channels in the background, so their chats open with
+    // what was said before. Refreshed every minute; nothing while logged out.
+    let pins = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            tick.tick().await;
+            let tw = &pins.tw;
+            let live = pins
+                .auth
+                .call(true, |t| async move { tw.followed_streams(&t.token, t.user_id.as_deref().unwrap_or_default()).await })
+                .await;
+            match live {
+                Ok(Some(streams)) => {
+                    pins.chat.set_pinned(streams.iter().take(MAX_PINNED_CHATS).map(|s| s.user_login.to_lowercase()).collect())
+                }
+                Ok(None) => pins.chat.set_pinned(Default::default()),
+                Err(e) => tracing::debug!("followed streams for chat history: {e:#}"),
             }
         }
     });

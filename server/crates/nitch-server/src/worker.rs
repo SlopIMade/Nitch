@@ -42,7 +42,9 @@ pub fn run() -> Result<()> {
         anyhow::bail!("first command must be start");
     };
     // `None` once stopped, so the status thread notices and the stop can take the pipeline.
+    let dir = config.dir.display().to_string();
     let mv = Arc::new(Mutex::new(Some(Multiview::start(config)?)));
+    tracing::info!(%dir, "multiview worker running");
 
     // Status reports, every second.
     let reporter = mv.clone();
@@ -50,8 +52,12 @@ pub fn run() -> Result<()> {
         let mut out = std::io::stdout();
         loop {
             let status = {
-                let guard = reporter.lock().unwrap();
-                let Some(mv) = guard.as_ref() else { return };
+                let mut guard = reporter.lock().unwrap();
+                let Some(mv) = guard.as_mut() else { return };
+                // Hidden rendition switches that are ready take over.
+                if let Err(e) = mv.poll() {
+                    tracing::warn!("switching a tile's rendition failed: {e:#}");
+                }
                 Status { states: mv.tile_states(), failure: mv.failure() }
             };
             let line = serde_json::to_string(&status).unwrap_or_default();

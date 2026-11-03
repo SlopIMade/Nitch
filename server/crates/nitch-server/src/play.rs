@@ -124,6 +124,39 @@ fn matching_variant(master: &Master, primary: &Master, index: usize) -> Option<U
         .map(|v| v.uri.clone())
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VideoRendition {
+    pub index: usize,
+    pub height: u32,
+    pub fps: u32,
+    pub bandwidth: u64,
+}
+
+/// Twitch names renditions like `720p60`, `480p`, `1080p60 (source)`; no number means 30.
+fn fps_from_name(name: &str) -> u32 {
+    name.split_once('p')
+        .map(|(_, rest)| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(30)
+}
+
+/// The cheapest rendition that still looks right in a tile `target` pixels tall: the lowest one
+/// reaching 80 % of that (a slight upscale isn't visible), else the highest. The output runs at
+/// 30 fps, so 30 fps beats 60 fps of the same height (half the decoding).
+pub fn choose_rendition(videos: &[VideoRendition], target: u32) -> Option<usize> {
+    let enough = |v: &&VideoRendition| v.height * 5 >= target * 4;
+    let cost = |v: &&VideoRendition| (v.height, v.fps > 30, v.bandwidth);
+    videos
+        .iter()
+        .filter(enough)
+        .min_by_key(cost)
+        .or_else(|| {
+            let top = videos.iter().map(|v| v.height).max()?;
+            videos.iter().filter(|v| v.height == top).min_by_key(cost)
+        })
+        .map(|v| v.index)
+}
+
 impl Player {
     pub fn new(tw: Twitch) -> Self {
         Self { tw, sessions: Mutex::new(HashMap::new()), counter: AtomicU64::new(0) }
@@ -177,24 +210,26 @@ impl Player {
         self.sessions.lock().unwrap().get(id).map(|s| s.status.clone())
     }
 
-    /// The rendition to use for a picture `height` pixels tall: the smallest one at least that
-    /// tall (saves decoding, S3), else the largest. Audio-only renditions are skipped.
+    /// The rendition to use for a multiview tile whose picture is `height` pixels tall (see
+    /// [`choose_rendition`]).
     pub fn pick_rendition(&self, id: &str, height: u32) -> Option<usize> {
         let sessions = self.sessions.lock().unwrap();
-        let heights: Vec<(usize, u32)> = sessions
+        let videos: Vec<VideoRendition> = sessions
             .get(id)?
             .primary
             .variants
             .iter()
             .enumerate()
-            .filter_map(|(i, v)| Some((i, v.resolution.as_deref()?.split_once('x')?.1.parse().ok()?)))
+            .filter_map(|(index, v)| {
+                Some(VideoRendition {
+                    index,
+                    height: v.resolution.as_deref()?.split_once('x')?.1.parse().ok()?,
+                    fps: fps_from_name(&v.name),
+                    bandwidth: v.bandwidth,
+                })
+            })
             .collect();
-        heights
-            .iter()
-            .filter(|(_, h)| *h >= height)
-            .min_by_key(|(_, h)| *h)
-            .or_else(|| heights.iter().max_by_key(|(_, h)| *h))
-            .map(|(i, _)| *i)
+        choose_rendition(&videos, height)
     }
 
     /// For diagnostics: active play sessions (channel, ad status).
@@ -398,4 +433,35 @@ fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
         }
     }
     s.status.ad = ad;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn twitch() -> Vec<VideoRendition> {
+        [(1080, 60), (720, 60), (720, 30), (480, 30), (360, 30), (160, 30)]
+            .iter()
+            .enumerate()
+            .map(|(index, &(height, fps))| VideoRendition { index, height, fps, bandwidth: (height * fps) as u64 })
+            .collect()
+    }
+
+    #[test]
+    fn small_tiles_get_small_renditions() {
+        let v = twitch();
+        assert_eq!(choose_rendition(&v, 1080), Some(0)); // full screen: 1080p60 (the only one)
+        assert_eq!(choose_rendition(&v, 720), Some(2)); // 720p30, not 720p60
+        assert_eq!(choose_rendition(&v, 540), Some(3)); // a 2x2 tile: 480p is enough
+        assert_eq!(choose_rendition(&v, 360), Some(4));
+        assert_eq!(choose_rendition(&v, 100), Some(5));
+        assert_eq!(choose_rendition(&v, 2000), Some(0));
+    }
+
+    #[test]
+    fn fps_comes_from_the_name() {
+        assert_eq!(fps_from_name("720p60"), 60);
+        assert_eq!(fps_from_name("480p"), 30);
+        assert_eq!(fps_from_name("1080p60 (source)"), 60);
+    }
 }

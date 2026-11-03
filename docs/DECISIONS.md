@@ -297,8 +297,35 @@ Further steps if needed: Twitch's prefetch segments for the tiles, a shorter pla
 Editing a running multiview used to leave the player. Now "Layout" (bottom bar or side menu) turns
 the tiles into editable outlines over the running picture; every change is saved and applied live,
 and the audio keeps playing. With the remote: pick a tile (‹ ›), "Move" or "Resize" hands it the
-arrows until OK. The editor page remains for new sessions.
+arrows until OK. The separate editor page and the layout templates are gone (2026-11-03): sessions
+are created by adding streams while watching.
 
 A tile is now an area of any shape; its 16:9 picture is centered inside (the compositor's
 `keep-aspect-ratio`). Free shapes are the default, Shift keeps 16:9, "16:9" shrinks an area to
 its picture. A tile's source rendition follows the picture's height, not the area's.
+
+### D30 — Tiles use the cheapest fitting rendition, switched without a gap
+*2026-11-03*
+
+A tile reads the lowest rendition reaching 80 % of its picture's height (a slight upscale isn't
+visible), and 30 fps before 60 fps of the same height, since the output runs at 30 fps. A quarter
+tile (540 px) reads 480p30 instead of 720p60: far less to download and decode.
+
+When a resize calls for another rendition, the new source starts muted, right underneath the
+current one in the same place (stacking, not transparency: a transparent pad's frames weren't
+composited, and the tile stayed black for seconds after the swap). It takes over once it has
+delivered frames for 1.5 s; "frames arrived" is a probe on its compositor pad, since fallbacksrc's
+status says "buffering" near the live edge even while frames flow. Hidden sources get no
+placeholder frames (no immediate fallback, a 15 s timeout), so a placeholder can't pass for the
+stream; one that shows nothing within 12 s is dropped and the old source stays. The layout itself
+changes at once. Measured: no black frames in either direction. This replaces D23.
+
+### D31 — Chat history from reading the followed channels in the background
+*2026-11-03*
+
+Twitch's API has no chat history. Third-party services (recent-messages) would learn which
+channels are watched, so the server does it itself: it reads the chats of the followed live
+channels (up to 50, refreshed every minute; anonymous IRC, cheap) and keeps the last 150 messages
+of every chat it reads. A client subscribing to a channel first gets `chat_history`, so the chat
+opens with what was said. Limit: a channel opened from search, without following it, starts empty.
+

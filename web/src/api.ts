@@ -44,7 +44,6 @@ export const GRID = 60;
 export type Tile = { channel: string; x: number; y: number; w: number; h: number; z: number; fit?: "contain" | "cover" };
 export type Rect = { x: number; y: number; w: number; h: number };
 export type Session = { id: string; name: string; tiles: Tile[]; created_at: number; updated_at: number };
-export type Template = { key: string; name: string; rects: Rect[] };
 export type SlotInfo = Tile & { state: "live" | "loading" | "ad" | "retrying" | "offline" };
 /** Audio rendition `k` of the multiview stream belongs to `slots[k]`. */
 export type MultiviewInfo = { hls_url: string; grid: number; slots: (SlotInfo | null)[] };
@@ -107,7 +106,6 @@ export const api = {
 
   sessions: () => request<Session[]>("/api/sessions"),
   session: (id: string) => request<Session>(`/api/sessions/${encodeURIComponent(id)}`),
-  templates: () => request<Template[]>("/api/sessions/templates"),
   createSession: (name: string, tiles: Tile[]) =>
     request<Session>("/api/sessions", { method: "POST", body: JSON.stringify({ name, tiles }) }),
   updateSession: (id: string, patch: { name?: string; tiles?: Tile[] }) =>

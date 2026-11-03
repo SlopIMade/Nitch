@@ -99,21 +99,41 @@ export function moveFocus(dir: Dir): boolean {
 /** How long a key must be held to count as a long press. */
 export const LONG_PRESS_MS = 450;
 
-let press: { key: string; target: EventTarget | null; fired: boolean; timer: number } | null = null;
+/**
+ * Repeats of a held key come every ~50 ms. A press with no keydown for this long is over, even if
+ * its keyup never arrived (Android can swallow it after a long press): it must not block the key.
+ */
+const STALE_MS = 600;
+
+let press: { key: string; target: EventTarget | null; fired: boolean; timer: number; last: number } | null = null;
+
+/** The current press of `key`, unless it went stale. */
+function current(key: string) {
+  if (press?.key === key && performance.now() - press.last < STALE_MS) return press;
+  if (press?.key === key) {
+    clearTimeout(press.timer);
+    press = null;
+  }
+  return null;
+}
 
 /**
  * Tells short from long presses of `key`. Call it from keydown and keyup handlers: `onLong`
  * runs once the key has been held for LONG_PRESS_MS; keyup returns "short" if that didn't
- * happen. Timed, not counted: Android's WebView repeats a held key only sporadically and never
- * sets `repeat`. On keydown the default action is prevented, so a held OK doesn't also click.
+ * happen. Timed, not counted: Android's WebView repeats a held key irregularly and never sets
+ * `repeat`. On keydown the default action is prevented, so a held OK doesn't also click.
  */
 export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string, onLong?: () => void): "short" | null {
   if (e.key !== key) return null;
   if (e.type === "keydown") {
     e.preventDefault();
-    // A repeat of the key that's already down.
-    if (press?.key === key) return null;
-    const p = { key, target: e.target, fired: false, timer: 0 };
+    const held = current(key);
+    if (held) {
+      // A repeat of the key that's already down.
+      held.last = performance.now();
+      return null;
+    }
+    const p = { key, target: e.target, fired: false, timer: 0, last: performance.now() };
     p.timer = window.setTimeout(() => {
       if (press !== p) return;
       p.fired = true;
@@ -137,7 +157,9 @@ export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string, on
 window.addEventListener(
   "keydown",
   (e) => {
-    if (press?.fired && press.key === e.key) {
+    const held = current(e.key);
+    if (held?.fired) {
+      held.last = performance.now();
       e.preventDefault();
       e.stopImmediatePropagation();
     }

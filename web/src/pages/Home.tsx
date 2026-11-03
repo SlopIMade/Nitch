@@ -1,10 +1,10 @@
 // The start page: saved multiview sessions (the same on every device, D17) and the followed
 // channels that are live. A session plays with one click; a channel too, and while it plays,
-// more streams can be added from the player's side menu.
+// more streams are added from the player's side menu. Layouts are edited in the player.
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { api, type Session } from "../api";
 import { Icon } from "../components/Icon";
 import { LayoutPreview } from "../components/LayoutPreview";
@@ -36,9 +36,6 @@ function SessionCard({ s, onDelete }: { s: Session; onDelete: () => void }) {
       <div className="card__body">
         <div className="card__title">{s.name}</div>
         <div className="row row--left">
-          <Link className="btn btn--ghost btn--small" to={`/multiview/${s.id}`}>
-            <Icon name="edit" /> Edit
-          </Link>
           <DeleteButton onDelete={onDelete} />
         </div>
       </div>
@@ -48,12 +45,10 @@ function SessionCard({ s, onDelete }: { s: Session; onDelete: () => void }) {
 
 export function HomePage() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
   const auth = useQuery({ queryKey: ["auth"], queryFn: api.auth });
   const loggedIn = auth.data?.state === "logged_in";
   const follows = useQuery({ queryKey: ["follows"], queryFn: api.followsLive, enabled: loggedIn, refetchInterval: 60_000 });
   const sessions = useQuery({ queryKey: ["sessions"], queryFn: api.sessions });
-  const templates = useQuery({ queryKey: ["templates"], queryFn: api.templates, staleTime: Infinity });
   const remove = useMutation({
     mutationFn: api.deleteSession,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions"] }),
@@ -61,33 +56,17 @@ export function HomePage() {
 
   return (
     <div className="page">
-      <section className="home__section">
-        <h2>Multiview</h2>
-        {sessions.isError && <p className="error">Could not load sessions: {sessions.error.message}</p>}
-        <div className="grid grid--small">
-          {sessions.data?.map((s) => (
-            <SessionCard key={s.id} s={s} onDelete={() => remove.mutate(s.id)} />
-          ))}
-        </div>
-        <h3 className="home__sub">New multiview</h3>
-        <div className="grid grid--tiny">
-          {templates.data?.map((t) => (
-            <button key={t.key} className="card card--new" onClick={() => navigate(`/multiview/new?template=${t.key}`)}>
-              <div className="card__thumb card__thumb--layout">
-                <LayoutPreview rects={t.rects} />
-              </div>
-              <div className="card__body">
-                <div className="card__title">
-                  <Icon name="plus" /> {t.name}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-        {sessions.data?.length === 0 && (
-          <p className="muted">Tip: while a stream plays, hold ← (or use “＋ Streams”) to add more streams to the screen.</p>
-        )}
-      </section>
+      {(sessions.data?.length ?? 0) > 0 && (
+        <section className="home__section">
+          <h2>Multiview</h2>
+          <div className="grid grid--small">
+            {sessions.data?.map((s) => (
+              <SessionCard key={s.id} s={s} onDelete={() => remove.mutate(s.id)} />
+            ))}
+          </div>
+        </section>
+      )}
+      {sessions.isError && <p className="error">Could not load sessions: {sessions.error.message}</p>}
 
       <section className="home__section">
         <h2>Live now</h2>
@@ -105,6 +84,11 @@ export function HomePage() {
             <StreamCard key={s.login} stream={s} />
           ))}
         </div>
+        {sessions.data?.length === 0 && (
+          <p className="muted home__tip">
+            Tip: while a stream plays, hold ← on the remote (or use “Streams”) to add more streams to the screen.
+          </p>
+        )}
       </section>
     </div>
   );

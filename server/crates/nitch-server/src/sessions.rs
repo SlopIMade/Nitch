@@ -84,47 +84,6 @@ pub fn validate_tiles(tiles: Vec<Tile>) -> Result<Vec<Tile>, String> {
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct Rect {
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Template {
-    pub key: &'static str,
-    pub name: &'static str,
-    pub rects: Vec<Rect>,
-}
-
-const fn r(x: u32, y: u32, w: u32, h: u32) -> Rect {
-    Rect { x, y, w, h }
-}
-
-/// Starting points for new sessions. Every rect has equal `w` and `h`, so each tile is 16:9.
-pub fn templates() -> Vec<Template> {
-    vec![
-        Template { key: "side-by-side", name: "Side by side", rects: vec![r(0, 15, 30, 30), r(30, 15, 30, 30)] },
-        Template {
-            key: "grid-2x2",
-            name: "2 × 2",
-            rects: vec![r(0, 0, 30, 30), r(30, 0, 30, 30), r(0, 30, 30, 30), r(30, 30, 30, 30)],
-        },
-        Template {
-            key: "big-plus-2",
-            name: "1 big + 2",
-            rects: vec![r(0, 10, 40, 40), r(40, 10, 20, 20), r(40, 30, 20, 20)],
-        },
-        Template {
-            key: "big-plus-3",
-            name: "1 big + 3",
-            rects: vec![r(0, 7, 45, 45), r(45, 7, 15, 15), r(45, 22, 15, 15), r(45, 37, 15, 15)],
-        },
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,12 +108,4 @@ mod tests {
         assert!(validate_tiles(vec![bad]).is_err());
     }
 
-    #[test]
-    fn templates_are_valid_and_16_by_9() {
-        for t in templates() {
-            let tiles = t.rects.iter().map(|r| tile(r.x, r.y, r.w, r.h)).collect();
-            assert!(validate_tiles(tiles).is_ok(), "{}", t.key);
-            assert!(t.rects.iter().all(|r| r.w == r.h), "{} has a non-16:9 tile", t.key);
-        }
-    }
 }

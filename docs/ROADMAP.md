@@ -88,7 +88,7 @@ playback resumes on its own. ✓ (with simulated ads)
 ## M4 — Multiview
 
 - [x] Sessions stored on the server (SQLite), unlimited: CRUD API, tiles in 60×60 grid cells,
-  validation (inside the grid, max 9 tiles), templates
+  validation (inside the grid, max 9 tiles)
 - [x] Pipeline manager (`nitch-media` + `multiview.rs`): one pipeline per **running** session, shared by
   every device that opens it; tiles added / replaced / moved / removed at runtime
 - [x] Tiles read internal play sessions (ad handling for tiles too), without slates (D22)
@@ -96,10 +96,11 @@ playback resumes on its own. ✓ (with simulated ads)
 - [x] Encoder choice: `NITCH_ENCODER=x264|va` (VA-API falls back to x264 if missing)
 - [x] Limit on running sessions, idle teardown after 45 s, failed pipelines restarted, offline
   tiles retried every minute
-- [x] Web: session list (play, edit, delete, new from template), tile labels and states, focus +
+- [x] Web: session list (play, delete), tile labels and states, focus +
   audio on click or ← →
-- [x] Grid editor: templates as a starting point, add streams, drag/resize with snapping (16:9 lock,
-  Shift for free), keyboard editing, selected tile's actions in the toolbar
+- [x] Layout editing in the player over the running picture (D29): drag/resize with snapping, tiles
+  as free areas with the 16:9 picture centered, remote: tile picker + Move/Resize; cheapest fitting
+  rendition per tile, switched without a gap (D30)
 - [x] Docker image with GStreamer (x264, libav, VA drivers)
 - [x] `session_updated` events over the WebSocket, so all devices showing a session follow edits
 - [ ] Layout-change markers in the playlist, so overlays switch exactly with the video (today they switch a few
@@ -148,6 +149,7 @@ Tested on 2026-11-03 in the browser:
 - [x] Move and resize with the mouse (header, corner) or with "Move"/"Size" + arrows (remote);
   font size with A−/A+ or Ctrl + wheel; saved per device
 - [x] All chat changes apply live, without interrupting playback
+- [x] Chat history: the server reads the followed live chats in the background (D31)
 - [ ] Badges as icons (Helix chat badges); third-party emotes (backlog)
 
 Tested on 2026-11-03 in the browser: single view chat (40 lines in 10 s, emotes), moving with

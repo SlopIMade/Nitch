@@ -84,11 +84,10 @@ settings open as layers on top of it, so changing a setting never stops the stre
 |---|---|
 | Connect | TV only, when no server is known: discovered servers + manual address. |
 | Login | Device code + QR code ("open twitch.tv/activate on your phone"). |
-| Home | Followed channels that are live: thumbnail, title, category, viewers. |
+| Home | Saved multiview sessions (play, delete) and the followed channels that are live: thumbnail, title, category, viewers. |
 | Search | Channel search, live channels first. TV uses the system on-screen keyboard. |
 | Player | Single stream, quality, ad-break overlay, chat overlay. |
-| Sessions | Your saved multiview sessions (any number, same list on every device): open, create (from a template), rename, duplicate, delete. |
-| Multiview | Plays a session. The editor adds streams from follows/search and places them on the 60×60 grid (move, resize, snap); the focused tile gets audio. |
+| Player | Full screen only (D27). Side menu (hold ← / “Streams”): add streams live (search, recommended, follows); a single view becomes a multiview session. “Layout” edits the tiles over the running picture (D29); the focused tile gets audio. |
 | Settings | Opens over the running player and changes apply live. Covers chat (mode, channels, opacity, font size), default quality, ad strategy order, output resolution, encoder info and logout. |
 
 ### Android TV shell (`android-tv/`)
@@ -195,7 +194,8 @@ output:
     A screen with another aspect ratio shows the same 16:9 picture with black bars.
 - **Sessions:** a multiview session is a saved, named arrangement of tiles (channel + grid
   rectangle), stored on the server. There is no limit on the number of sessions.
-  - Templates (1+1, 2×2, 1 big + 2 small, 1 big + 3 small) are only starting points for new sessions.
+  - Sessions are created by adding a stream to what's playing; layouts adapt automatically and are
+    fine-tuned in the player's layout mode.
   - **Opening a session** starts its pipeline, or joins it if it's already running: two devices on the
     same session share one pipeline and see the same picture. Audio track and chat stay per device.
   - **Editing a session** on any device updates the saved session and the running pipeline. Other devices
@@ -348,7 +348,6 @@ REST + JSON under `/api`:
 | GET | `/api/play/{id}` | Ad status of a play session: `{ad: {from, until, filled_by}}` or `{ad: null}` |
 | GET | `/api/sessions` | All saved multiview sessions |
 | POST | `/api/sessions` | Create `{name, tiles[]}` (tile: `{channel, x, y, w, h, z, fit}` in grid cells) |
-| GET | `/api/sessions/templates` | Starting layouts (side by side, 2×2, 1 big + 2, 1 big + 3), every tile 16:9 |
 | GET | `/api/sessions/{id}` | One session |
 | PATCH | `/api/sessions/{id}` | Rename, or change tiles; a running pipeline applies it live |
 | DELETE | `/api/sessions/{id}` | Delete a session (stops its pipeline) |
@@ -359,8 +358,9 @@ REST + JSON under `/api`:
 
 WebSocket at `/api/ws`:
 
-- **Server → client:** `auth_changed`, `ad_break`, `ad_break_end`, `tile_state` (loading / live / offline), `session_updated`, `chat_message`.
-- **Client → server:** `chat_subscribe {channels[]}`. Every `chat_message` carries its channel, which
+- **Server → client:** `session_updated`, `chat` (one message), `chat_history {channel, messages[]}`
+  (sent on subscribing: what the server already has of that chat, D31).
+- **Client → server:** `chat_subscribe {channels[]}`. Every `chat` message carries its channel, which
   is what the combined chat needs.
 
 Playlists and segments are served under `/hls/...`.

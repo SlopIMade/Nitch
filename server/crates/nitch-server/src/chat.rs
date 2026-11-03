@@ -2,8 +2,12 @@
 //! server. Channels are joined while at least one client wants them (reference counted) and
 //! parted when nobody does. Messages go to every WebSocket client through a broadcast channel;
 //! each client filters for the channels it shows (focused stream, or the combined set).
+//!
+//! History: the last [`HISTORY`] messages of every joined channel are kept, and a client gets them
+//! when it subscribes, so a chat opens with what was said before. Twitch offers no history, so
+//! the server reads the followed live channels in the background ("pinned") to have some.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -15,6 +19,8 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::sessions::valid_channel;
 
 const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
+/// Messages kept per joined channel.
+pub const HISTORY: usize = 150;
 
 /// One chat line, as sent to clients.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -95,6 +101,10 @@ pub struct ChatHub {
     cmds: mpsc::UnboundedSender<Cmd>,
     messages: broadcast::Sender<ChatMessage>,
     counts: Mutex<HashMap<String, usize>>,
+    /// The latest messages of each joined channel, oldest first.
+    history: Mutex<HashMap<String, VecDeque<ChatMessage>>>,
+    /// Channels read in the background (each holds one subscription).
+    pinned: Mutex<HashSet<String>>,
 }
 
 impl ChatHub {
@@ -102,7 +112,54 @@ impl ChatHub {
         let (cmds, rx) = mpsc::unbounded_channel();
         let (messages, _) = broadcast::channel(1024);
         tokio::spawn(run(rx, messages.clone()));
-        std::sync::Arc::new(Self { cmds, messages, counts: Mutex::new(HashMap::new()) })
+        let hub = std::sync::Arc::new(Self {
+            cmds,
+            counts: Mutex::new(HashMap::new()),
+            history: Mutex::new(HashMap::new()),
+            pinned: Mutex::new(HashSet::new()),
+            messages,
+        });
+        // Record every message of a joined channel.
+        let recorder = hub.clone();
+        let mut rx = hub.messages.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(m) => recorder.record(m),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        });
+        hub
+    }
+
+    fn record(&self, m: ChatMessage) {
+        if !self.counts.lock().unwrap().contains_key(&m.channel) {
+            return;
+        }
+        let mut history = self.history.lock().unwrap();
+        let h = history.entry(m.channel.clone()).or_default();
+        h.push_back(m);
+        while h.len() > HISTORY {
+            h.pop_front();
+        }
+    }
+
+    /// The latest messages of `channel` (empty if it isn't read).
+    pub fn history(&self, channel: &str) -> Vec<ChatMessage> {
+        self.history.lock().unwrap().get(&channel.to_lowercase()).map(|h| h.iter().cloned().collect()).unwrap_or_default()
+    }
+
+    /// Sets the channels read in the background (the followed live ones).
+    pub fn set_pinned(&self, channels: HashSet<String>) {
+        let old = std::mem::replace(&mut *self.pinned.lock().unwrap(), channels.clone());
+        for c in old.difference(&channels) {
+            self.unsubscribe(c);
+        }
+        for c in channels.difference(&old) {
+            self.subscribe(c);
+        }
     }
 
     pub fn messages(&self) -> broadcast::Receiver<ChatMessage> {
@@ -136,6 +193,7 @@ impl ChatHub {
             *n -= 1;
             if *n == 0 {
                 counts.remove(&channel);
+                self.history.lock().unwrap().remove(&channel);
                 let _ = self.cmds.send(Cmd::Part(channel));
             }
         }

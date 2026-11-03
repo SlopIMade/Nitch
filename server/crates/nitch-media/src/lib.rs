@@ -107,12 +107,37 @@ struct Source {
     comp_pad: gst::Pad,
     mix_pad: gst::Pad,
     fallbacksrc: gst::Element,
+    started: std::time::Instant,
+    /// When the first video frame reached the compositor. (fallbacksrc's `status` isn't
+    /// enough: close to the live edge it reports "buffering" while frames flow.)
+    first_frame: Arc<Mutex<Option<std::time::Instant>>>,
 }
+
+impl Source {
+    /// How long frames have been arriving (None: not yet).
+    fn showing_for(&self) -> Option<std::time::Duration> {
+        self.first_frame.lock().unwrap().map(|t| t.elapsed())
+    }
+}
+
+/// A hidden source takes over once it has delivered frames this long.
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
 
 struct Slot {
     mixer: gst::Element,
     source: Option<Source>,
+    /// A new source for the same tile (another rendition), started silent underneath the
+    /// current one; it replaces `source` once it shows, so the picture never goes black (D30).
+    pending: Option<(Source, TileSpec)>,
 }
+
+/// A hidden source that shows nothing by then is given up (the old one stays); shorter than
+/// HIDDEN_TIMEOUT, after which it would start sending placeholder frames.
+const PENDING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(12);
+/// fallbacksrc: no data for this long and the tile shows its placeholder (black, silent).
+const TILE_TIMEOUT: u64 = 3_000_000_000;
+/// The same for a hidden source, which mustn't take over with placeholder frames.
+const HIDDEN_TIMEOUT: u64 = 15_000_000_000;
 
 pub struct Multiview {
     cfg: Config,
@@ -247,7 +272,7 @@ impl Multiview {
             gst::Element::link_many([&silence, &silence_caps])?;
             silence_caps.static_pad("src").unwrap().link(&mixer.request_pad_simple("sink_%u").context("mixer pad")?)?;
             gst::Element::link_many([&mixer, &mix_caps, &aconv, &aenc, &aparse, &aq, &asink])?;
-            slots.push(Slot { mixer, source: None });
+            slots.push(Slot { mixer, source: None, pending: None });
         }
 
         let mv = Self {
@@ -325,47 +350,107 @@ impl Multiview {
     }
 
     /// Puts `spec` into slot `k` (or empties it). Same URI: only the geometry changes, live.
+    /// Another URI while the current source runs (the same stream in another rendition): the
+    /// new source starts hidden and takes over in [`Multiview::poll`] once it runs.
     pub fn set_tile(&mut self, k: usize, spec: Option<&TileSpec>) -> Result<()> {
         anyhow::ensure!(k < self.slots.len(), "slot {k} out of range");
-        match (spec, self.slots[k].source.as_ref()) {
-            (Some(spec), Some(src)) if src.uri == spec.uri => {
+        let Some(spec) = spec else {
+            self.drop_pending(k)?;
+            return self.remove_source(k);
+        };
+        let slot = &mut self.slots[k];
+        if let Some((_, want)) = slot.pending.as_mut().filter(|(p, _)| p.uri == spec.uri) {
+            *want = spec.clone();
+            return Ok(());
+        }
+        match slot.source.as_ref() {
+            Some(src) if src.uri == spec.uri => {
                 place(&src.comp_pad, spec);
+                self.drop_pending(k)
+            }
+            Some(src) if src.showing_for().is_some() => {
+                // The layout changes now; the picture's quality once the new source shows.
+                place(&src.comp_pad, spec);
+                self.drop_pending(k)?;
+                let hidden = self.make_source(k, spec, true)?;
+                tracing::info!(slot = k, uri = %spec.uri, "starting another rendition hidden");
+                self.slots[k].pending = Some((hidden, spec.clone()));
                 Ok(())
             }
-            (spec, _) => {
+            _ => {
+                self.drop_pending(k)?;
                 self.remove_source(k)?;
-                if let Some(spec) = spec {
-                    self.add_source(k, spec)?;
-                }
+                self.slots[k].source = Some(self.make_source(k, spec, false)?);
                 Ok(())
             }
         }
     }
 
-    fn remove_source(&mut self, k: usize) -> Result<()> {
-        if let Some(old) = self.slots[k].source.take() {
-            for e in &old.elements {
-                e.set_state(gst::State::Null)?;
+    /// Swaps in hidden sources that run now, gives up on those that never started. Call
+    /// regularly (the worker does, every second).
+    pub fn poll(&mut self) -> Result<()> {
+        for k in 0..self.slots.len() {
+            let Some((pending, _)) = self.slots[k].pending.as_ref() else { continue };
+            if pending.showing_for().is_some_and(|d| d >= SETTLE) {
+                let (new, spec) = self.slots[k].pending.take().unwrap();
+                new.mix_pad.set_property("mute", false);
+                new.fallbacksrc.set_property("timeout", TILE_TIMEOUT);
+                place(&new.comp_pad, &spec);
+                // The old one was on top of it; without it, the new one is simply visible.
+                self.remove_source(k)?;
+                tracing::info!(slot = k, uri = %new.uri, "tile switched to another rendition");
+                self.slots[k].source = Some(new);
+            } else if pending.started.elapsed() > PENDING_TIMEOUT {
+                tracing::warn!(slot = k, uri = %pending.uri, "new rendition didn't start; keeping the old one");
+                self.drop_pending(k)?;
             }
-            self.pipeline.remove_many(&old.elements)?;
-            self.comp.release_request_pad(&old.comp_pad);
-            self.slots[k].mixer.release_request_pad(&old.mix_pad);
         }
         Ok(())
     }
 
-    fn add_source(&mut self, k: usize, spec: &TileSpec) -> Result<()> {
+    fn drop_pending(&mut self, k: usize) -> Result<()> {
+        if let Some((old, _)) = self.slots[k].pending.take() {
+            self.release(old)?;
+        }
+        Ok(())
+    }
+
+    fn remove_source(&mut self, k: usize) -> Result<()> {
+        if let Some(old) = self.slots[k].source.take() {
+            self.release(old)?;
+        }
+        Ok(())
+    }
+
+    fn release(&mut self, old: Source) -> Result<()> {
+        for e in &old.elements {
+            e.set_state(gst::State::Null)?;
+        }
+        self.pipeline.remove_many(&old.elements)?;
+        self.comp.release_request_pad(&old.comp_pad);
+        // The mixer belongs to the slot the pad came from.
+        if let Some(mixer) = old.mix_pad.parent_element() {
+            mixer.release_request_pad(&old.mix_pad);
+        }
+        Ok(())
+    }
+
+    /// A tile source for slot `k`, linked into the compositor and the slot's mixer; `hidden`
+    /// ones are transparent and muted.
+    fn make_source(&mut self, k: usize, spec: &TileSpec, hidden: bool) -> Result<Source> {
         // No fallback image: it failed to negotiate inside fallbacksrc and kept retrying in the
         // background. A failed tile shows black; the client draws its state (loading,
         // unavailable) as an overlay from `tile_states`, sharper and localizable.
         let src = gst::ElementFactory::make("fallbacksrc")
             .property("uri", &spec.uri)
-            .property("timeout", 3_000_000_000u64)
+            // Hidden (a rendition switch): no placeholder frames for a while, so the first frame that
+            // arrives is the stream itself; normal again once it takes over (`poll`).
+            .property("timeout", if hidden { HIDDEN_TIMEOUT } else { TILE_TIMEOUT })
             .property("restart-timeout", 5_000_000_000u64)
             // Keep retrying for a day; huge values (u64::MAX/2) overflow inside fallbacksrc.
             .property("retry-timeout", 86_400_000_000_000u64)
             .property("restart-on-eos", true)
-            .property("immediate-fallback", true)
+            .property("immediate-fallback", !hidden)
             .build()?;
         let aconv = make("audioconvert")?;
         let ares = make("audioresample")?;
@@ -377,7 +462,20 @@ impl Multiview {
         comp_pad.set_property_from_str("sizing-policy", "keep-aspect-ratio");
         place(&comp_pad, spec);
         let mix_pad = self.slots[k].mixer.request_pad_simple("sink_%u").context("mixer pad")?;
+        if hidden {
+            // Hidden by the old source on top of it, not by transparency: a transparent pad's
+            // frames weren't composited, and after the swap the tile stayed black for seconds.
+            comp_pad.set_property("zorder", zorder(spec.z) - 1);
+            mix_pad.set_property("mute", true);
+        }
         acaps.static_pad("src").unwrap().link(&mix_pad)?;
+
+        let first_frame = Arc::new(Mutex::new(None));
+        let flag = first_frame.clone();
+        comp_pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            *flag.lock().unwrap() = Some(std::time::Instant::now());
+            gst::PadProbeReturn::Remove
+        });
 
         let video_target = comp_pad.clone();
         let audio_target = aconv.static_pad("sink").unwrap();
@@ -390,14 +488,15 @@ impl Multiview {
         for e in [&aconv, &ares, &acaps, &src] {
             e.sync_state_with_parent()?;
         }
-        self.slots[k].source = Some(Source {
+        Ok(Source {
             uri: spec.uri.clone(),
             elements: vec![src.clone(), aconv, ares, acaps],
             comp_pad,
             mix_pad,
             fallbacksrc: src,
-        });
-        Ok(())
+            started: std::time::Instant::now(),
+            first_frame,
+        })
     }
 
     /// `fallbacksrc` status per slot (`running`, `buffering`, `retrying`, …), `None` when empty.
@@ -434,10 +533,16 @@ impl Drop for Multiview {
 /// Applies a tile's geometry: position, size and stacking on the compositor pad.
 /// "Cover" (crop to fill) isn't implemented yet: `aspectratiocrop` in front of the compositor
 /// broke fallbacksrc's negotiation, so cover tiles are letterboxed like "contain" for now.
+/// Compositor stacking for a tile: above the background (0), with room for a hidden source
+/// right below each tile.
+fn zorder(z: u32) -> u32 {
+    (z + 1) * 2
+}
+
 fn place(pad: &gst::Pad, spec: &TileSpec) {
     pad.set_property("xpos", spec.x);
     pad.set_property("ypos", spec.y);
     pad.set_property("width", spec.w);
     pad.set_property("height", spec.h);
-    pad.set_property("zorder", spec.z + 1);
+    pad.set_property("zorder", zorder(spec.z));
 }

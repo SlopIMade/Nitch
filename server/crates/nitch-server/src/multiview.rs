@@ -222,15 +222,20 @@ impl Manager {
                     (new_plays.remove(&k), None)
                 };
                 let (x, y, w, h) = pixels(&tile);
-                // A new tile gets the rendition just above its size; a moved or resized one keeps
-                // its source, so the picture isn't interrupted.
-                let uri = kept_uri.or_else(|| {
-                    let id = play_id.as_ref()?;
-                    // The picture is 16:9 inside the tile's area (letterboxed when the area isn't).
-                    let video_h = h.min(w * 9 / 16);
-                    let rendition = self.player.pick_rendition(id, video_h as u32)?;
-                    Some(format!("{}/hls/{id}/v{rendition}.m3u8", self.base))
-                });
+                // The rendition that fits the tile's picture (16:9 inside the area). A resized
+                // tile that needs another one gets it without a gap: the worker starts it hidden
+                // and swaps when it runs (D30). Unchanged, the tile keeps its source.
+                let video_h = h.min(w * 9 / 16);
+                let uri = play_id
+                    .as_ref()
+                    .and_then(|id| {
+                        let rendition = self.player.pick_rendition(id, video_h as u32)?;
+                        Some(format!("{}/hls/{id}/v{rendition}.m3u8", self.base))
+                    })
+                    .or(kept_uri.clone());
+                if kept_uri.is_some() && uri != kept_uri {
+                    tracing::info!(channel = %tile.channel, video_h, uri = ?uri, "tile resized: switching to another rendition");
+                }
                 let spec = uri.clone().map(|uri| TileSpec { uri, x, y, w, h, z: tile.z, cover: tile.fit == Fit::Cover });
                 r.mv.set_tile(k, spec.as_ref())?;
                 r.slots[k] = Some(SlotTile { tile, play_id, uri });

@@ -6,7 +6,6 @@ import { Icon } from "./components/Icon";
 import { HomePage } from "./pages/Home";
 import { LoginPage } from "./pages/Login";
 import { SearchPage } from "./pages/Search";
-import { SessionEditorPage } from "./pages/SessionEditor";
 import { SettingsPage } from "./pages/Settings";
 import { usePlayer } from "./player/PlayerContext";
 import { PlayerLayer } from "./player/PlayerLayer";
@@ -112,8 +111,7 @@ export function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/multiview" element={<Navigate to="/" replace />} />
-          <Route path="/multiview/:id" element={<SessionEditorPage />} />
+          <Route path="/multiview/*" element={<Navigate to="/" replace />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<HomePage />} />
         </Routes>

@@ -1,7 +1,8 @@
 // Chat data: one WebSocket to the server for the whole app (D6, M6). The player says which
 // channels are in view; their messages are kept here (the last KEEP per channel), whether or
 // not the overlay shows them, so switching chat modes or turning the chat off and on keeps
-// what was already there.
+// what was already there. On subscribing, the server sends what it already has of a channel
+// (it reads the followed live channels in the background), so a chat opens with history.
 
 import { useSyncExternalStore } from "react";
 
@@ -15,7 +16,7 @@ export type ChatMessage = {
   emotes: [string, number, number][];
   badges: string[];
   ts: number;
-  /** Arrival order across all channels (set here). */
+  /** Arrival order across all channels (set here; also the React key). */
   seq: number;
 };
 
@@ -48,6 +49,7 @@ function connect() {
   socket.onmessage = (e) => {
     const data = JSON.parse(e.data);
     if (data.type === "chat") receive(data as ChatMessage);
+    else if (data.type === "chat_history") receiveHistory(data.channel, data.messages);
     else eventListeners.forEach((l) => l(data as ServerEvent));
   };
   socket.onclose = () => {
@@ -56,11 +58,29 @@ function connect() {
   };
 }
 
+/** Order of display: Twitch's send time, then arrival. */
+const byTime = (a: ChatMessage, b: ChatMessage) => a.ts - b.ts || a.seq - b.seq;
+const sameMessage = (a: ChatMessage, b: ChatMessage) => a.ts === b.ts && a.user === b.user && a.text === b.text;
+
 function receive(m: ChatMessage) {
   const buf = buffers.get(m.channel);
   if (!buf) return;
-  buf.push({ ...m, seq: seq++ });
+  buf.push({ ...m, ts: m.ts || Date.now(), seq: seq++ });
   if (buf.length > KEEP) buf.splice(0, buf.length - KEEP);
+  changed();
+}
+
+/** Messages from before the chat was opened; merged in without duplicates. */
+function receiveHistory(channel: string, messages: ChatMessage[]) {
+  const buf = buffers.get(channel);
+  if (!buf || messages.length === 0) return;
+  for (const m of messages) if (!buf.some((b) => sameMessage(b, m))) buf.push({ ...m, seq: seq++ });
+  buf.sort(byTime);
+  if (buf.length > KEEP) buf.splice(0, buf.length - KEEP);
+  changed();
+}
+
+function changed() {
   // One render per frame, however busy the chats are.
   if (!frame)
     frame = requestAnimationFrame(() => {
@@ -100,7 +120,7 @@ export function useChatMessages(channels: string[]): ChatMessage[] {
       cacheKey = k;
       cache = channels
         .flatMap((c) => buffers.get(c) ?? [])
-        .sort((a, b) => a.seq - b.seq)
+        .sort(byTime)
         .slice(-KEEP);
     }
     return cache;

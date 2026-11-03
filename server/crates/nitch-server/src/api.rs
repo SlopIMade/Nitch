@@ -15,7 +15,7 @@ use serde_json::json;
 use crate::auth::{Auth, AuthStatus};
 use crate::multiview::{self, MultiviewInfo};
 use crate::play::{PlayOptions, PlayStatus, Player};
-use crate::sessions::{self, Session, SessionInput, Template};
+use crate::sessions::{self, Session, SessionInput};
 use crate::store::Store;
 
 pub struct AppState {
@@ -51,7 +51,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/play", post(play))
         .route("/api/play/{id}", get(play_status).delete(stop_play))
         .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/templates", get(session_templates))
         .route("/api/sessions/{id}", get(get_session).patch(update_session).delete(delete_session))
         .route("/api/sessions/{id}/play", get(multiview_status).post(play_session))
         .route("/hls/mv/{id}/{*path}", get(multiview_file))
@@ -291,10 +290,6 @@ async fn list_sessions(State(s): St) -> ApiResult<Vec<Session>> {
     Ok(Json(s.store.sessions()?))
 }
 
-async fn session_templates() -> Json<Vec<Template>> {
-    Json(sessions::templates())
-}
-
 async fn get_session(State(s): St, Path(id): Path<String>) -> ApiResult<Session> {
     s.store.session(&id)?.map(Json).ok_or_else(|| ApiError::NotFound("no such session".into()))
 }
@@ -419,6 +414,12 @@ async fn websocket_client(socket: axum::extract::ws::WebSocket, s: Arc<AppState>
                     }
                     for c in wanted.difference(&subscribed) {
                         s.chat.subscribe(c);
+                        // What was said before (if the server already reads that chat).
+                        let history = s.chat.history(c);
+                        let event = json!({ "type": "chat_history", "channel": c, "messages": history });
+                        if tx.send(Message::text(event.to_string())).await.is_err() {
+                            return;
+                        }
                     }
                     subscribed = wanted;
                 }

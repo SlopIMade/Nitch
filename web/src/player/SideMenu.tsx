@@ -315,6 +315,18 @@ export function SideMenu(props: {
   useEffect(() => {
     if (!moved.current || !box.current?.contains(document.activeElement)) focusFirst();
   });
+  // An arrow while the focus is somewhere else (it can't be in the menu then): select the first
+  // entry instead of going nowhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.key.startsWith("Arrow") || box.current?.contains(document.activeElement)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      focusFirst();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   return (
     <div

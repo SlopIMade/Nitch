@@ -62,6 +62,19 @@ export function LayoutBar({
   const sel = selected !== null ? tiles[selected] : null;
   const step = (d: number) => tiles.length && setSelected(((selected ?? 0) + d + tiles.length) % tiles.length);
 
+  // The picture makes room for the bar (it wraps to two rows on narrow screens).
+  useEffect(() => {
+    const el = bar.current;
+    const player = el?.closest<HTMLElement>(".player");
+    if (!el || !player) return;
+    const ro = new ResizeObserver(() => player.style.setProperty("--edit-bar", `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      player.style.removeProperty("--edit-bar");
+    };
+  }, []);
+
   // Start on "Move" (once there's a tile to move), so the remote can go right away.
   const started = useRef(false);
   useEffect(() => {

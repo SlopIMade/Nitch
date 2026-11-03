@@ -301,15 +301,12 @@ h2 {
 
 /* ---------- home ---------- */
 
-.home__section + .home__section {
-  margin-top: 2.25rem;
+.home__tip {
+  margin-top: 1.5rem;
 }
 
-.home__sub {
-  margin: 1.4rem 0 0.7rem;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 600;
+.home__section + .home__section {
+  margin-top: 2.25rem;
 }
 
 .grid {
@@ -320,11 +317,6 @@ h2 {
 
 .grid--small {
   grid-template-columns: repeat(auto-fill, minmax(min(12rem, 100%), 1fr));
-}
-
-.grid--tiny {
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.8rem;
 }
 
 .card {
@@ -411,12 +403,6 @@ h2 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.card--new .card__title {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.85rem;
 }
 
 .layout-preview {
@@ -847,11 +833,6 @@ h2 {
   height: 1.1rem;
   background: linear-gradient(135deg, transparent 50%, #fff 50%);
   cursor: nwse-resize;
-}
-
-.editor__canvas {
-  width: min(100%, calc((100vh - 15rem) * 16 / 9));
-  margin: 1rem 0;
 }
 
 .player__bar--edit {
@@ -1311,4 +1292,25 @@ html.tv .menu-entry__main:focus {
   gap: 0.25em;
   margin-left: 0.6em;
   color: #ff9a9a;
+}
+
+/* Layout mode: the picture sits above the bar (its measured height is --edit-bar), so the
+   bottom tiles' resize handles stay reachable; the title bar steps aside. */
+.player--editing {
+  align-items: flex-start;
+}
+
+.player--editing .player__stage {
+  width: min(100%, calc((100vh - var(--edit-bar, 5rem)) * 16 / 9));
+  max-height: calc(100vh - var(--edit-bar, 5rem));
+}
+
+.player--editing .player__bar--top {
+  display: none;
+}
+
+/* The selected entry stands out in every mode, not only with the TV's focus ring. */
+.menu-entry__main:focus,
+.menu-entry__side:focus {
+  background: rgba(255, 255, 255, 0.14);
 }

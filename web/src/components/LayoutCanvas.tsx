@@ -1,7 +1,7 @@
 // The multiview grid (D13/D17): tiles snap to the 60×60 cells. A tile is an area of any shape;
 // its 16:9 picture sits centered inside (drawn here, so the result is visible while editing).
 // Mouse: drag to move, drag the corner to resize (Shift keeps the picture's 16:9 shape).
-// Keyboard and remote editing is up to the page using it (see `nudge`).
+// Remote editing is up to the player's layout bar (see `nudge`).
 
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { GRID } from "../api";
@@ -36,15 +36,12 @@ export function LayoutCanvas({
   selected,
   onSelect,
   onChange,
-  onChannel,
   className = "",
 }: {
   tiles: EditorTile[];
   selected: number | null;
   onSelect: (i: number | null) => void;
   onChange: (tiles: EditorTile[]) => void;
-  /** Clicking a tile's name (choose its channel); none: the name is just a label. */
-  onChannel?: (i: number) => void;
   className?: string;
 }) {
   const canvas = useRef<HTMLDivElement>(null);
@@ -89,13 +86,7 @@ export function LayoutCanvas({
           onPointerDown={(e) => down(e, i, "move")}
         >
           <div className="layout-tile__picture" />
-          {onChannel ? (
-            <button className="layout-tile__name" onPointerDown={(e) => e.stopPropagation()} onClick={() => onChannel(i)} tabIndex={-1}>
-              {t.channel ?? "+ Choose channel"}
-            </button>
-          ) : (
-            <span className="layout-tile__name">{t.channel}</span>
-          )}
+          <span className="layout-tile__name">{t.channel}</span>
           <span className="layout-tile__size">
             {t.w}×{t.h}
           </span>
