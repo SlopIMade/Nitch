@@ -14,7 +14,9 @@ mod worker;
 use std::sync::Arc;
 
 use anyhow::Result;
+use axum::http::{HeaderValue, header};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeader;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
@@ -96,8 +98,18 @@ async fn server() -> Result<()> {
     if !index.exists() {
         tracing::warn!(dir = %config.web_dir.display(), "web app not built; only the API is available");
     }
-    let spa = ServeDir::new(&config.web_dir).fallback(ServeFile::new(index));
-    let app = api::router(state).fallback_service(spa).layer(TraceLayer::new_for_http());
+    // index.html must never come from a cache: after an update it names new asset files, and a
+    // WebView holding the old one would load scripts that no longer exist (a blank page). A
+    // missing asset is a 404, never index.html.
+    let spa = SetResponseHeader::overriding(
+        ServeDir::new(&config.web_dir).fallback(ServeFile::new(index)),
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache"),
+    );
+    let app = api::router(state)
+        .nest_service("/assets", ServeDir::new(config.web_dir.join("assets")))
+        .fallback_service(spa)
+        .layer(TraceLayer::new_for_http());
 
     // Discovery for the TV app; optional (NITCH_MDNS=0 turns it off, and it may fail without multicast).
     let _announcement = match std::env::var("NITCH_MDNS").as_deref() {

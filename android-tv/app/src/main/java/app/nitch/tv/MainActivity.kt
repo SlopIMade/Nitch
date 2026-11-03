@@ -48,6 +48,9 @@ class MainActivity : Activity() {
             isFocusableInTouchMode = true
         }
         setContentView(web)
+        // The page comes from the server and changes with it: a cached old index.html would point
+        // at script files that no longer exist (a blank screen), so start without any cache.
+        web.clearCache(true)
         val server = prefs.getString(KEY_SERVER, null)
         if (server != null) web.loadUrl(server) else showConnect(null)
     }
@@ -138,6 +141,8 @@ class MainActivity : Activity() {
         fun connect(address: String) = runOnUiThread {
             var url = address.trim()
             if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://$url"
+            // No port given: the server's default.
+            if (url.startsWith("http://") && android.net.Uri.parse(url).port == -1) url = url.trimEnd('/') + ":8080"
             if (!url.endsWith("/")) url += "/"
             prefs.edit().putString(KEY_SERVER, url).apply()
             stopDiscovery()

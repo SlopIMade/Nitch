@@ -94,8 +94,22 @@ Credentials first: copy `.env.example` to `.env` and fill in the Twitch app's Cl
 
   The container keeps its own login in the `nitch-data` volume. `NITCH_BIND=0.0.0.0:8090` in front
   of the command runs it next to a dev server that's already on 8080.
-- **Android TV emulator:** reaches the server at `10.0.2.2:<port>`. mDNS doesn't pass through the
-  emulator's NAT, so use manual entry there.
+- **Android TV emulator:** reaches the server at `10.0.2.2:8080`, and also at the WSL address that
+  mDNS announces (e.g. `172.24.x.x`). After updating the web app, the TV app clears its cache on start,
+  and the server sends `index.html` with `no-cache`. An old cached copy pointed at deleted
+  scripts and gave a black screen.
+- **A real TV against the server in WSL:** the WSL address (`172.24.x.x`) only exists on this PC.
+  A TV on the LAN needs WSL's mirrored networking, so the server is reachable at the PC's
+  LAN address. Put this in `%UserProfile%\.wslconfig`, then run `wsl --shutdown`:
+
+  ```ini
+  [wsl2]
+  networkingMode=mirrored
+  ```
+
+  You may also need to allow port 8080 in the Windows firewall. On the target VM none of this applies.
+- **Clock under WSL:** the monotonic clock in WSL2 can run several percent slow. Multiview
+  pipelines therefore use the wall clock ([D26](DECISIONS.md#d26--multiview-pipelines-run-on-the-wall-clock)).
 - **Encoding on this PC:** software x264 only. WSL exposes the GPU as `/dev/dxg` but has no
   `/dev/dri`, and GStreamer's VA plugin needs `/dev/dri`. That's fine: the 3900X has plenty of
   headroom, and the GPU path that matters has to be verified on the target VM anyway.
