@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Navigate, NavLink, Route, Routes } from "react-router";
 import { api } from "./api";
@@ -57,7 +57,10 @@ function Header() {
  * adjusting handle Back themselves; then a modal, then the player (playback ends).
  */
 function BackKey() {
-  const { target, stop } = usePlayer();
+  const player = usePlayer();
+  // Installed once, so it stays below the handlers of menus that open later.
+  const current = useRef(player);
+  current.current = player;
   useEffect(
     () =>
       installBackHandler(() => {
@@ -65,13 +68,13 @@ function BackKey() {
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
           return true;
         }
-        if (target) {
-          stop();
+        if (current.current.target) {
+          current.current.stop();
           return true;
         }
         return false;
       }),
-    [target, stop],
+    [],
   );
   return null;
 }

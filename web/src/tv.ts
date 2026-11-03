@@ -99,29 +99,31 @@ export function moveFocus(dir: Dir): boolean {
 /** How long a key must be held to count as a long press. */
 export const LONG_PRESS_MS = 450;
 
-let press: { key: string; target: EventTarget | null; t0: number; fired: boolean } | null = null;
+let press: { key: string; target: EventTarget | null; fired: boolean; timer: number } | null = null;
 
 /**
- * Tells short from long presses of `key` (the remote holds a key by repeating keydown). Call it
- * from keydown and keyup handlers: returns "long" once while the key is held long enough,
- * "short" on keyup if it wasn't, otherwise null. On keydown the default action is prevented, so
- * a held OK doesn't also click.
+ * Tells short from long presses of `key`. Call it from keydown and keyup handlers: `onLong`
+ * runs once the key has been held for LONG_PRESS_MS; keyup returns "short" if that didn't
+ * happen. Timed, not counted: Android's WebView repeats a held key only sporadically and never
+ * sets `repeat`. On keydown the default action is prevented, so a held OK doesn't also click.
  */
-export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string): "short" | "long" | null {
+export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string, onLong?: () => void): "short" | null {
   if (e.key !== key) return null;
   if (e.type === "keydown") {
     e.preventDefault();
-    if (!e.repeat || !press || press.key !== key) {
-      press = { key, target: e.target, t0: performance.now(), fired: false };
-      return null;
-    }
-    if (!press.fired && performance.now() - press.t0 >= LONG_PRESS_MS) {
-      press.fired = true;
-      return "long";
-    }
+    // A repeat of the key that's already down.
+    if (press?.key === key) return null;
+    const p = { key, target: e.target, fired: false, timer: 0 };
+    p.timer = window.setTimeout(() => {
+      if (press !== p) return;
+      p.fired = true;
+      onLong?.();
+    }, LONG_PRESS_MS);
+    press = p;
     return null;
   }
   if (e.type === "keyup" && press?.key === key) {
+    clearTimeout(press.timer);
     const short = !press.fired && press.target === e.target;
     press = null;
     return short ? "short" : null;
@@ -129,17 +131,41 @@ export function pressKind(e: KeyboardEvent | ReactKeyboardEvent, key: string): "
   return null;
 }
 
+// A key released where no handler asked (e.g. the long press opened a menu that took over):
+// forget the press after the handlers had their turn.
+window.addEventListener("keyup", (e) => {
+  const p = press;
+  if (p?.key === e.key)
+    setTimeout(() => {
+      if (press === p) {
+        clearTimeout(p.timer);
+        press = null;
+      }
+    });
+});
+
 const KEYS: Record<string, Dir> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
-/** Back: the topmost thing closes first; at the start page the TV app exits. */
-export function installBackHandler(onBack: () => boolean) {
-  const back = () => {
-    if (onBack()) return;
-    if (window.history.length > 1 && location.pathname !== "/") window.history.back();
-    else window.NitchTV?.exit();
+/** Back handlers, the most recently added first: it's what opened last (a menu over the player). */
+const backHandlers: (() => boolean)[] = [];
+
+window.addEventListener("nitch:back", () => {
+  for (let i = backHandlers.length - 1; i >= 0; i--) if (backHandlers[i]()) return;
+  // Nothing open: go back a page; at the start page the TV app exits.
+  if (window.history.length > 1 && location.pathname !== "/") window.history.back();
+  else window.NitchTV?.exit();
+});
+
+/**
+ * Handles the remote's Back key while installed: return true if it did something (closed a
+ * menu, left the player), false to let the next handler down try. Returns the remover.
+ */
+export function installBackHandler(onBack: () => boolean): () => void {
+  backHandlers.push(onBack);
+  return () => {
+    const i = backHandlers.lastIndexOf(onBack);
+    if (i >= 0) backHandlers.splice(i, 1);
   };
-  window.addEventListener("nitch:back", back);
-  return () => window.removeEventListener("nitch:back", back);
 }
 
 /** Spatial navigation for the whole app. Call once. */

@@ -232,19 +232,42 @@ runs in its own process (`nitch-server multiview-worker`), controlled with JSON 
 A crash ends only that pipeline, and it is restarted while someone watches.
 Tested by sending `SIGSEGV` to a worker: the server kept answering, and a new worker took over in ~10 s.
 
-## D26 — Multiview pipelines run on the wall clock
+### D26 — Multiview pipelines run on the wall clock
+*2026-11-03*
 
-**Context:** In a live multiview, playback stuttered (~50 ms every few seconds) and the delay grew
+In a live multiview, playback stuttered (~50 ms every few seconds) and the delay grew
 to minutes. Measured: the output carried only ~0.93 s of media per real second. Under WSL2 the
 monotonic clock, which GStreamer uses by default, ran ~7 % slow; WSL corrects the wall clock by
 stepping it ~2.9 s forward every ~35 s. Players on other machines play in real time, so they ran
 dry again and again.
 
-**Decision:** The multiview pipeline uses a `GstSystemClock` with `clock-type=realtime`. On a
+The multiview pipeline uses a `GstSystemClock` with `clock-type=realtime`. On a
 normal Linux host both clocks run at the same rate, so nothing changes there; where the monotonic
 clock drifts, the output still keeps real time. A forward step of the wall clock just makes the
 pipeline produce the missed frames in a burst, which the players' buffers absorb. hls.js also
 catches up on its own (`maxLiveSyncPlaybackRate` 1.08, jump beyond 8 segments), so a stall can
 never add lasting delay.
 
-**Measured after the change:** 1.0000 s of media per second over 2 minutes.
+Measured after the change: 1.0000 s of media per second over 2 minutes.
+
+### D27 — The player is full screen only, with a side menu instead of pages
+*2026-11-03*
+
+From the first test on the TV: the mini player got in the way, Home and Multiview were two
+places for one thing, and the remote could only switch tiles. Now:
+- The player always covers the screen; Back or ✕ ends playback. Home shows the saved multiview
+  sessions and the live follows.
+- While watching, a side menu (hold ← on the remote, or "＋ Streams") adds streams live: search,
+  recommended (`@name` mentions in the titles of the streams in view), followed live channels.
+  OK watches a stream alone, holding OK (or the + button) adds it. A single view turns into a new
+  multiview session. Layouts adapt on their own (`web/src/layout.ts`).
+- The old stream keeps playing until the new one is ready, so changes are never silent.
+- Chat settings live in the same menu (usable with the remote); the overlay itself has no
+  buttons, only a drag edge and corner on hover. Messages are kept per channel, so mode changes
+  lose nothing.
+- Back is a stack of handlers (`installBackHandler`): what opened last closes first. Android 13+
+  delivers Back to the TV app only through `OnBackInvokedCallback`, which forwards it to the page.
+- Long presses are timed (450 ms from the first keydown): Android's WebView repeats a held key
+  only sporadically and never sets `repeat`.
+
+This replaces the mini player part of D14; the player still never unmounts on navigation.

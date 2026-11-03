@@ -6,7 +6,7 @@
 // into move/resize until OK or Back.
 
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import { claimArrows } from "../tv";
+import { claimArrows, installBackHandler } from "../tv";
 import { parts, useChatMessages } from "./chat";
 import { channelColor, updateChat, useChatSettings, type ChatSettings } from "./chatSettings";
 
@@ -64,16 +64,15 @@ export function ChatOverlay({
         onAdjustDone();
       }
     };
-    const onBack = (e: Event) => {
-      e.stopImmediatePropagation();
-      onAdjustDone();
-    };
     window.addEventListener("keydown", onKey, true);
-    window.addEventListener("nitch:back", onBack, true);
+    const removeBack = installBackHandler(() => {
+      onAdjustDone();
+      return true;
+    });
     return () => {
       release();
+      removeBack();
       window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("nitch:back", onBack, true);
     };
   }, [adjust, onAdjustDone]);
 

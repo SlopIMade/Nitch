@@ -336,7 +336,11 @@ export function PlayerLayer() {
     hideTimer.current = window.setTimeout(() => setControls(false), 3500);
   }, []);
   useEffect(() => {
-    if (target) poke();
+    if (!target) return;
+    poke();
+    // The page behind the player keeps no focus: OK must not activate something under it.
+    const el = document.activeElement as HTMLElement | null;
+    if (el && !el.closest(".player")) el.blur();
   }, [key, poke]);
 
   const openMenu = (tab: MenuTab) => {
@@ -367,7 +371,7 @@ export function PlayerLayer() {
         return;
       }
       if (inControls()) return;
-      if (e.key === "ArrowLeft" && pressKind(e, "ArrowLeft") === "long") openMenu("add");
+      if (e.key === "ArrowLeft") pressKind(e, "ArrowLeft", () => openMenu("add"));
       if (e.key === "ArrowRight" && !e.repeat) {
         e.preventDefault();
         step(1);

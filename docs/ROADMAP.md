@@ -48,7 +48,7 @@ documented, with fixtures.
 - [x] Device code login, token refresh, logout. Tested end to end with a real account on 2026-11-02.
 - [x] Helix: followed live streams, search, channel info
 - [x] Single view via the proxy: master rewritten, segments straight from the CDN (D16)
-- [x] Web: app shell with a persistent player (mini player while browsing), routing, Login
+- [x] Web: app shell with a persistent player (full screen only since D27), routing, Login
   (code + QR), Home, Search, Player
 - [x] Dockerfile + compose; the image builds and runs on this PC. Running it on the target VM moved to M8.
 - Later in M2/M3: lower latency (Twitch prefetch segments), WebSocket events instead of polling `/api/auth`
@@ -125,12 +125,15 @@ Tested on 2026-11-03 in the browser:
 ## M5 — Android TV
 
 - [x] 10-foot UI: TV mode (larger type, strong focus rings, controls visible while focused),
-  geometric spatial navigation on every screen (D24), Back key handling, focusable mini player
+  geometric spatial navigation on every screen (D24), Back key handling (D27)
 - [x] Kotlin shell: WebView, Leanback launcher + banner, Back/Play-Pause keys, keep screen on, cleartext
 - [x] Server discovery: mDNS (`_nitch._tcp`, announced by the server) + manual entry
-- [ ] **Build the APK** in Android Studio (Gradle can't run in my sandbox; see `android-tv/README.md`)
-- [ ] Testing: Android TV emulator + a real device (search with the on-screen keyboard, editing with
-  the remote)
+- [x] **Build the APK** in Android Studio (first build by the user on 2026-11-03; Gradle can't run in
+  my sandbox, see `android-tv/README.md`)
+- [x] Player side menu for the remote: add streams live (hold ←), chat settings (D27)
+- [ ] Testing: emulator done on 2026-11-03 (connect, home, multiview, side menu, Back via the page).
+  Still open: a rebuilt APK with the Back callback, and a real device (search with the on-screen
+  keyboard, editing with the remote)
 
 **Needs from you:** building the APK once in Android Studio, and which Android TV device(s) you use.
 **Done when:** the whole app is usable with nothing but the TV remote.

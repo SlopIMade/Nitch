@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import { pressKind } from "../tv";
+import { installBackHandler, pressKind } from "../tv";
 import { CHAT_PLACES, channelColor, resetChat, updateChat, useChatSettings, type ChatMode } from "./chatSettings";
 import type { ChatAdjust } from "./ChatOverlay";
 
@@ -37,7 +37,7 @@ function Entry({
         className="menu-entry__main"
         disabled={disabled}
         onClick={(e) => e.detail > 0 && onShort()}
-        onKeyDown={(e) => pressKind(e, "Enter") === "long" && onLong?.()}
+        onKeyDown={(e) => pressKind(e, "Enter", onLong ?? onShort)}
         onKeyUp={(e) => pressKind(e, "Enter") === "short" && onShort()}
       >
         {children}
@@ -265,20 +265,19 @@ export function SideMenu(props: {
 
   // Back or Escape closes the menu (before anything else handles them).
   useEffect(() => {
-    const onBack = (e: Event) => {
-      e.stopImmediatePropagation();
-      onClose();
-    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose();
       }
     };
-    window.addEventListener("nitch:back", onBack, true);
+    const removeBack = installBackHandler(() => {
+      onClose();
+      return true;
+    });
     window.addEventListener("keydown", onKey, true);
     return () => {
-      window.removeEventListener("nitch:back", onBack, true);
+      removeBack();
       window.removeEventListener("keydown", onKey, true);
     };
   }, [onClose]);

@@ -3,6 +3,7 @@ package app.nitch.tv
 import android.app.Activity
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.WindowManager
@@ -11,6 +12,7 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.window.OnBackInvokedDispatcher
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,6 +50,13 @@ class MainActivity : Activity() {
             isFocusableInTouchMode = true
         }
         setContentView(web)
+        // Android 13+ delivers Back through this callback (from Android 16 on, only through it),
+        // never as a key event; the page decides what Back means.
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
+                sendToPage("nitch:back")
+            }
+        }
         // The page comes from the server and changes with it: a cached old index.html would point
         // at script files that no longer exist (a blank screen), so start without any cache.
         web.clearCache(true)
@@ -65,15 +74,18 @@ class MainActivity : Activity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val name = when (event.keyCode) {
-            KeyEvent.KEYCODE_BACK -> "nitch:back"
+            // Android 13+: Back goes through the callback registered in onCreate.
+            KeyEvent.KEYCODE_BACK -> if (Build.VERSION.SDK_INT >= 33) return super.dispatchKeyEvent(event) else "nitch:back"
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> "nitch:playpause"
             else -> return super.dispatchKeyEvent(event)
         }
         // The page decides what Back means (close player, go back, exit via NitchTV.exit()).
-        if (event.action == KeyEvent.ACTION_UP) {
-            web.evaluateJavascript("window.dispatchEvent(new Event('$name'))", null)
-        }
+        if (event.action == KeyEvent.ACTION_UP) sendToPage(name)
         return true
+    }
+
+    private fun sendToPage(event: String) {
+        web.evaluateJavascript("window.dispatchEvent(new Event('$event'))", null)
     }
 
     // ---------- server discovery ----------
