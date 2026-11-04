@@ -1208,11 +1208,21 @@ h2 {
 }
 
 .stepper > span:first-child {
+  flex: none;
   width: 7rem;
 }
 
+/* Same-size buttons and value in every row, so the rows line up. */
+.stepper .btn {
+  flex: none;
+  justify-content: center;
+  width: 2.6rem;
+  padding: 0;
+}
+
 .stepper__value {
-  min-width: 3.5rem;
+  flex: none;
+  width: 4rem;
   text-align: center;
   color: var(--muted);
 }
