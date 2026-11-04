@@ -1,0 +1,50 @@
+# Nitch on the home server VM (Debian 13, Docker, managed in Portainer): see docs/INSTALL.md.
+# The image is built on the VM (docker build -t nitch:latest -f deploy/Dockerfile .);
+# the data lives on the NAS, the multiview output in memory.
+#   docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
+# The Twitch credentials come from .env, or in Portainer from the stack's environment variables.
+
+services:
+  nitch:
+    image: nitch:latest
+    # Host networking: reachable on the LAN without port mapping, and the mDNS announcement
+    # reaches the TV app.
+    network_mode: host
+    environment:
+      NITCH_TWITCH_CLIENT_ID: ${NITCH_TWITCH_CLIENT_ID:?set in .env or the stack variables}
+      NITCH_TWITCH_CLIENT_SECRET: ${NITCH_TWITCH_CLIENT_SECRET:?set in .env or the stack variables}
+      NITCH_BIND: ${NITCH_BIND:-0.0.0.0:8080}
+      # VA-API on the VM's virtio GPU (AMD native context, D32); falls back to x264 if missing.
+      NITCH_ENCODER: ${NITCH_ENCODER:-va}
+      NITCH_MAX_MULTIVIEW: ${NITCH_MAX_MULTIVIEW:-2}
+      # GStreamer's plugin registry: local, not on the NAS.
+      XDG_CACHE_HOME: /tmp
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      # The VM's render and video groups (getent group render video), for /dev/dri.
+      - "104"
+      - "44"
+    volumes:
+      # nocopy: Docker would otherwise copy the image's /data ownership onto the share, which
+      # the NAS refuses (it maps every user to its own).
+      - type: volume
+        source: nitch-data
+        target: /data
+        volume:
+          nocopy: true
+      # Segments are rewritten every second and only needed for a minute: in memory.
+      - type: tmpfs
+        target: /data/multiview
+        tmpfs:
+          size: 536870912
+          mode: 01777
+    restart: unless-stopped
+
+volumes:
+  nitch-data:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=192.168.1.2,nfsvers=4.2,rw,noac
+      device: ":/export/nitch"

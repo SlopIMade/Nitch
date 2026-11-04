@@ -218,7 +218,8 @@ impl Multiview {
             .property(
                 "caps",
                 raw(cfg.width, cfg.height)
-                    .field("format", "I420")
+                    // What the encoder takes: the VA encoder only NV12, x264 I420.
+                    .field("format", if matches!(cfg.encoder, Encoder::Va) { "NV12" } else { "I420" })
                     .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
                     .field("interlace-mode", "progressive")
                     .field("colorimetry", "bt709")

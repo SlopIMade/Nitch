@@ -32,8 +32,12 @@ impl Store {
             std::fs::create_dir_all(dir)?;
         }
         let conn = Connection::open(path)?;
+        // Exclusive before WAL: then WAL needs no shared-memory file, which doesn't work on NFS
+        // (the data lives on a NAS, D32). Only this process opens the database; a second server
+        // on the same data fails right away instead of corrupting it.
         conn.execute_batch(
-            "PRAGMA journal_mode = WAL;
+            "PRAGMA locking_mode = EXCLUSIVE;
+             PRAGMA journal_mode = WAL;
              CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS sessions (
                  id TEXT PRIMARY KEY,

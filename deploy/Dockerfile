@@ -1,9 +1,9 @@
 # Nitch server + web app in one image. Build context: the repository root.
 #   docker compose -f deploy/compose.yaml up -d --build
-# Base is Ubuntu 24.04, the same release as the dev environment (D11), so GStreamer matches.
+# Base is Debian 13 (trixie), the target VM's release, so a GPU driver built for the VM fits (D32).
 
 # ---------- server ----------
-FROM ubuntu:24.04 AS server-build
+FROM debian:trixie AS server-build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential pkg-config curl ca-certificates \
       libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev \
@@ -35,14 +35,24 @@ COPY web/ ./
 RUN npm run build
 
 # ---------- runtime ----------
-FROM ubuntu:24.04
-# GStreamer for multiview: decoding (libav), x264 (ugly), compositor/HLS bits (base/good/bad),
-# and the VA-API drivers for hardware encoding on AMD/Intel (NITCH_ENCODER=va, M8).
-RUN apt-get update \
+FROM debian:trixie
+# GStreamer for multiview: decoding (libav), x264 (ugly), compositor/HLS bits (base/good/bad, which
+# includes the VA plugin), and the VA-API drivers for hardware encoding (NITCH_ENCODER=va).
+# Mesa comes from trixie-backports, the version the VM's own driver build is based on, and all of
+# its packages at once: they require each other's exact version, and plugins-bad needs EGL/GBM
+# (apt would otherwise drop plugins-bad without an error). Driver packages in deploy/debs/
+# (Mesa built with the AMD virtio native context, D32) replace Debian's.
+COPY deploy/debs/ /tmp/debs/
+RUN echo 'deb http://deb.debian.org/debian trixie-backports main' > /etc/apt/sources.list.d/backports.list \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
       gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
-      gstreamer1.0-plugins-ugly gstreamer1.0-libav mesa-va-drivers \
- && rm -rf /var/lib/apt/lists/* \
+      gstreamer1.0-plugins-ugly gstreamer1.0-libav gstreamer1.0-tools vainfo \
+      mesa-va-drivers/trixie-backports mesa-libgallium/trixie-backports libegl-mesa0/trixie-backports \
+      libgbm1/trixie-backports libglx-mesa0/trixie-backports libgl1-mesa-dri/trixie-backports \
+ && if ls /tmp/debs/*.deb >/dev/null 2>&1; then apt-get install -y --no-install-recommends /tmp/debs/*.deb; fi \
+ && dpkg -s gstreamer1.0-plugins-bad mesa-va-drivers >/dev/null \
+ && rm -rf /var/lib/apt/lists/* /tmp/debs \
  && useradd --system --uid 10001 --home-dir /data --no-create-home nitch \
  && mkdir -p /data && chown nitch /data
 COPY --from=server-build /src/target/release/nitch-server /usr/local/bin/nitch-server
@@ -56,6 +66,6 @@ ENV NITCH_BIND=0.0.0.0:8080 \
 USER nitch
 VOLUME /data
 EXPOSE 8080
-# bash, not sh: Ubuntu's sh (dash) has no /dev/tcp.
+# bash, not sh: Debian's sh (dash) has no /dev/tcp.
 HEALTHCHECK --interval=30s --timeout=3s CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${NITCH_BIND##*:}"]
 CMD ["nitch-server"]

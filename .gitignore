@@ -31,3 +31,6 @@ Thumbs.db
 
 # TypeScript build cache
 *.tsbuildinfo
+
+# GPU driver packages for the image (deploy/debs/README.md)
+deploy/debs/*.deb

@@ -68,6 +68,28 @@ The server holds the Twitch login, and any device on the network can use it.
 3. Open **Nitch** from the TV's app row. It lists the servers it finds on the network. Otherwise
    enter the address (e.g. `192.168.1.10:8080`).
 
+## On the home server VM (Debian 13, data on the NAS)
+
+The stack in `deploy/stack.yaml` is set up for it (D32): host networking, VA-API on the virtio GPU,
+the data on the NAS (`/export/nitch`, the folder must exist), the multiview
+output in memory.
+
+1. Copy the repository to the VM (e.g. `~/nitch`) and put the VM's Mesa build with the AMD virtio
+   driver into `deploy/debs/`: the `…+virtio_amd64.deb` packages `mesa-va-drivers`,
+   `mesa-libgallium`, `libegl-mesa0`, `libgbm1`, `libglx-mesa0` and `libgl1-mesa-dri` (all of them:
+   they require each other's exact version).
+2. Build the image and start the stack:
+
+   ```bash
+   sudo docker build -t nitch:latest -f deploy/Dockerfile .
+   sudo docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
+   ```
+
+   In Portainer, the stack can be created from the same file instead (Twitch credentials as stack
+   environment variables); the image has to be built on the VM first.
+3. Check: `sudo docker exec nitch-nitch-1 vainfo --display drm --device /dev/dri/renderD128` lists
+   `VAEntrypointEncSlice` for H.264, and the log says `encoder=Va`.
+
 ## Updating
 
 ```bash

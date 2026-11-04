@@ -79,6 +79,8 @@ Dev (WSL) and the production image use the same release, so GStreamer versions m
 gstreamer-rs 0.25 and gst-plugins-rs 0.15 (`fallbackswitch`, `fallbacksrc`, `hlssink3`, `hlscmafsink`)
 build, register statically and run against GStreamer 1.24.2.
 **Revisit** if we hit a bug that is only fixed in a newer GStreamer.
+*Superseded for the image by D32 (2026-11-04): it is Debian 13 with GStreamer 1.26; dev stays on
+Ubuntu 24.04.*
 
 ### D12 — Chat is a client-side overlay: off, focused or combined
 *2026-11-02*
@@ -328,4 +330,19 @@ channels are watched, so the server does it itself: it reads the chats of the fo
 channels (up to 50, refreshed every minute; anonymous IRC, cheap) and keeps the last 150 messages
 of every chat it reads. A client subscribing to a channel first gets `chat_history`, so the chat
 opens with what was said. Limit: a channel opened from search, without following it, starts empty.
+
+### D32 — The image is Debian 13, like the target VM; data on the NAS
+*2026-11-04*
+
+The target VM runs Debian 13 with a virtio GPU in AMD native-context mode. VA-API there decodes
+and encodes H.264, but only with a Mesa built with the AMD virtio driver (the VM's own
+`+virtio` packages; Debian's Mesa lacks it). So the image is Debian 13 as well, with Mesa
+from trixie-backports, and driver packages placed in `deploy/debs/` (git-ignored) replace
+Debian's at build time. The image's GStreamer is 1.26, dev stays on 1.24 (Ubuntu 24.04, D11).
+
+Data follows the server's convention: an NFS volume on the NAS
+(`/export/nitch`), the multiview output in a tmpfs, since it is rewritten
+every second and only needed for a minute. SQLite keeps WAL, but in exclusive locking mode, so it
+needs no shared-memory file (which doesn't work on NFS); a second server on the same data fails
+at once instead of corrupting it. The stack is `deploy/stack.yaml`; the image is built on the VM.
 
