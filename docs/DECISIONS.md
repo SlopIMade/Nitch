@@ -224,6 +224,7 @@ components, which Norigin (D3) would have required on every screen. Components t
 themselves (the multiview tile focus, the grid editor, chat adjustment) claim them, optionally
 only for some keys or while the focus is elsewhere.
 **Rejected:** Norigin Spatial Navigation, which means a rewrite of every screen for a UI this simple.
+*2026-11-05:* by rows (D33).
 
 ### D25 — Multiview pipelines run in worker processes
 *2026-11-03*
@@ -345,4 +346,20 @@ Data follows the server's convention: an NFS volume on the NAS
 every second and only needed for a minute. SQLite keeps WAL, but in exclusive locking mode, so it
 needs no shared-memory file (which doesn't work on NFS); a second server on the same data fails
 at once instead of corrupting it. The stack is `deploy/stack.yaml`; the image is built on the VM.
+
+### D33 — Chat beside the picture; a side menu that stays open; navigation by rows
+*2026-11-05*
+
+- **Chat beside the picture:** besides anywhere over the picture, the chat can be docked at the
+  right edge, full height, with its own width. The picture (and the player's bars) make room
+  for it, so on screens wider than 16:9 the chat uses what would be black bars instead of
+  covering a stream. Over the picture, the quick places are the four corners and a full-height
+  column at either side, shown as a small screen in the menu.
+- **The side menu stays open** after watching, adding or listening to a stream and after
+  adjusting the chat (it comes back on the button that started it): zap through channels, add
+  several streams, adjust step by step. Back closes it. Streams in view show game and viewers.
+- **Navigation by rows:** ↑ ↓ go to the nearest row and there to the closest element; ← → stay in
+  the row and stop at its end. Weighing both distances together sent ↓ past a nearer row to a
+  button straight below it (the chat menu's "Place" instead of "Look").
+- Volume: a slider next to mute on desktop and mobile; on the TV its own volume keys do that.
 

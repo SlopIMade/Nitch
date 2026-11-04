@@ -1,9 +1,10 @@
 // Chat overlay (M6, D12): drawn by the client over the video, so it stays sharp and changes
 // instantly. Modes: off, the focused stream, or one combined window of several streams.
-// It can sit anywhere on the screen, black bars included. Settings live in chatSettings.ts and
+// It sits over the picture anywhere on the screen, black bars included, or docked beside the
+// picture at the right edge (the picture shrinks next to it). Settings live in chatSettings.ts and
 // change from the side menu (remote) or here with the mouse: drag the top edge to move, the
-// corner to resize, Ctrl + wheel for the text size. For the remote, `adjust` turns the arrows
-// into move/resize until OK or Back.
+// corner to resize (docked: the left edge sets the width), Ctrl + wheel for the text size. For the
+// remote, `adjust` turns the arrows into move/resize until OK or Back.
 
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { claimArrows, installBackHandler } from "../tv";
@@ -57,7 +58,12 @@ export function ChatOverlay({
         e.stopPropagation();
         const step = e.repeat ? 2 : 1;
         updateChat((o) =>
-          adjust === "move" ? { x: o.x + d[0] * step, y: o.y + d[1] * step } : { w: o.w + d[0] * step, h: o.h + d[1] * step },
+          // Docked at the right edge: ← widens, → narrows.
+          o.dock
+            ? { dockW: o.dockW - d[0] * step }
+            : adjust === "move"
+              ? { x: o.x + d[0] * step, y: o.y + d[1] * step }
+              : { w: o.w + d[0] * step, h: o.h + d[1] * step },
         );
       } else if (e.key === "Enter" || e.key === "Escape") {
         e.preventDefault();
@@ -77,8 +83,9 @@ export function ChatOverlay({
     };
   }, [adjust, onAdjustDone]);
 
-  // Mouse: drag the top edge to move, the corner to resize (in percent of the screen).
-  const startDrag = (e: ReactPointerEvent, what: "move" | "size") => {
+  // Mouse: drag the top edge to move, the corner to resize, docked the left edge (in percent of
+  // the screen).
+  const startDrag = (e: ReactPointerEvent, what: "move" | "size" | "width") => {
     const screen = box.current?.parentElement?.getBoundingClientRect();
     if (!screen) return;
     e.preventDefault();
@@ -87,7 +94,7 @@ export function ChatOverlay({
       const dx = ((ev.clientX - start.px) / screen.width) * 100;
       const dy = ((ev.clientY - start.py) / screen.height) * 100;
       const o = start.s;
-      updateChat(what === "move" ? { x: o.x + dx, y: o.y + dy } : { w: o.w + dx, h: o.h + dy });
+      updateChat(what === "width" ? { dockW: o.dockW - dx } : what === "move" ? { x: o.x + dx, y: o.y + dy } : { w: o.w + dx, h: o.h + dy });
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -102,8 +109,12 @@ export function ChatOverlay({
   return (
     <div
       ref={box}
-      className={`chat${adjust ? " chat--adjusting" : ""}`}
-      style={{ left: `${s.x}%`, top: `${s.y}%`, width: `${s.w}%`, height: `${s.h}%`, fontSize: `${s.font}rem` }}
+      className={`chat${adjust ? " chat--adjusting" : ""}${s.dock ? " chat--docked" : ""}`}
+      style={
+        s.dock
+          ? { width: `${s.dockW}%`, fontSize: `${s.font}rem` }
+          : { left: `${s.x}%`, top: `${s.y}%`, width: `${s.w}%`, height: `${s.h}%`, fontSize: `${s.font}rem` }
+      }
       onWheel={(e) => {
         if (e.ctrlKey) {
           e.preventDefault();
@@ -112,7 +123,7 @@ export function ChatOverlay({
       }}
     >
       <div className="chat__bg" style={{ opacity: s.opacity }} />
-      <div className="chat__grip" onPointerDown={(e) => startDrag(e, "move")} title="Drag to move">
+      <div className="chat__grip" onPointerDown={(e) => !s.dock && startDrag(e, "move")} title={s.dock ? undefined : "Drag to move"}>
         <span className="chat__title">{channels.join(" · ")}</span>
         <button
           className="chat__gear"
@@ -153,8 +164,16 @@ export function ChatOverlay({
           </div>
         ))}
       </div>
-      <div className="chat__resize" onPointerDown={(e) => startDrag(e, "size")} title="Drag to resize" />
-      {adjust && <div className="chat__hint">{adjust === "move" ? "Arrows move the chat" : "Arrows resize the chat"} · OK when done</div>}
+      {s.dock ? (
+        <div className="chat__edge" onPointerDown={(e) => startDrag(e, "width")} title="Drag to change the width" />
+      ) : (
+        <div className="chat__resize" onPointerDown={(e) => startDrag(e, "size")} title="Drag to resize" />
+      )}
+      {adjust && (
+        <div className="chat__hint">
+          {s.dock ? "← → change the width" : adjust === "move" ? "Arrows move the chat" : "Arrows resize the chat"} · OK when done
+        </div>
+      )}
     </div>
   );
 }

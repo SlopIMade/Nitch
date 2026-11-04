@@ -8,22 +8,24 @@
 // Remote: ← → switch the tile (and its audio), hold ← for the side menu (add streams, chat),
 // ↑ ↓ reach the controls, OK shows them, Back leaves.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Hls, { type Level } from "hls.js";
 import { api, ApiError, formatViewers, GRID, type ChannelInfo, type MultiviewInfo, type PlayStatus, type SlotInfo } from "../api";
 import { Icon } from "../components/Icon";
 import { LayoutCanvas } from "../components/LayoutCanvas";
 import { addTile, removeTile } from "../layout";
-import { claimArrows, focusWithin, pressKind } from "../tv";
+import { claimArrows, focusWithin, isTv, pressKind } from "../tv";
 import { setChatChannels } from "./chat";
-import { ChatOverlay, type ChatAdjust } from "./ChatOverlay";
+import { ChatOverlay, shownChannels, type ChatAdjust } from "./ChatOverlay";
+import { useChatSettings } from "./chatSettings";
 import { QUALITY_KEY } from "../pages/Settings";
 import { usePlayer, type Target } from "./PlayerContext";
 import { LayoutBar, useLayoutEdit } from "./LayoutEdit";
 import { SideMenu, type MenuTab } from "./SideMenu";
 
 const MAX_TILES = 9;
+const VOLUME_KEY = "nitch.volume";
 
 type Quality = { index: number; label: string };
 
@@ -170,10 +172,17 @@ export function PlayerLayer() {
   const [qualities, setQualities] = useState<Quality[]>([]);
   const [quality, setQuality] = useState(-1); // -1 = auto
   const [muted, setMuted] = useState(false);
+  // Volume for desktop and mobile; on the TV, its own volume keys do that.
+  const [volume, setVolume] = useState(() => {
+    const v = Number(localStorage.getItem(VOLUME_KEY) ?? 1);
+    return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+  });
   const [playId, setPlayId] = useState<string | null>(null);
   const [focus, setFocus] = useState(0);
   const [audioTracks, setAudioTracks] = useState(0);
   const [menu, setMenu] = useState<MenuTab | null>(null);
+  // The menu entry to focus when the menu opens again (after an arrow adjustment of the chat).
+  const [menuFocus, setMenuFocus] = useState<string | null>(null);
   const [chatAdjust, setChatAdjust] = useState<ChatAdjust>(null);
   const [controls, setControls] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
@@ -336,6 +345,11 @@ export function PlayerLayer() {
     if (videoRef.current) videoRef.current.muted = muted;
   }, [muted]);
 
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume;
+    localStorage.setItem(VOLUME_KEY, String(volume));
+  }, [volume]);
+
   // Multiview: the focused tile's audio track plays (instant, no server round trip, D7).
   useEffect(() => {
     const hls = hlsRef.current;
@@ -386,13 +400,23 @@ export function PlayerLayer() {
 
   const openMenu = (tab: MenuTab) => {
     setChatAdjust(null);
+    setMenuFocus(null);
     setMenu(tab);
   };
   const closeMenu = useCallback(() => {
     setMenu(null);
     (document.activeElement as HTMLElement | null)?.blur();
   }, []);
-  const adjustDone = useCallback(() => setChatAdjust(null), []);
+  // An adjustment started from the menu goes back to it, on the same button.
+  const adjustFrom = useRef<string | null>(null);
+  const adjustDone = useCallback(() => {
+    setChatAdjust(null);
+    if (adjustFrom.current) {
+      setMenuFocus(adjustFrom.current);
+      setMenu("chat");
+      adjustFrom.current = null;
+    }
+  }, []);
 
   // ← → switch the tile, holding ← opens the menu. Only while the focus isn't in the controls.
   const playerKeys = !!target && !menu && !chatAdjust && !editing;
@@ -454,7 +478,6 @@ export function PlayerLayer() {
   useEffect(() => setEditing(false), [key]);
 
   const add = async (login: string) => {
-    setMenu(null);
     try {
       if (channel) {
         if (login === channel) return;
@@ -486,8 +509,11 @@ export function PlayerLayer() {
   const focusTile = (c: string) => {
     const k = slots.findIndex((s) => s?.channel === c);
     if (k >= 0) setFocus(k);
-    closeMenu();
   };
+
+  // Docked chat: the picture makes room for it at the right edge.
+  const chat = useChatSettings();
+  const docked = chat.dock && !!activeKey && !editing && shownChannels(chat, focusedChannel, inView).length > 0;
 
   // While a switch is starting, the old stream plays on; say what's happening.
   const starting = !!target && !ready && !error;
@@ -505,7 +531,8 @@ export function PlayerLayer() {
   const title = target.kind === "channel" ? (shown?.display_name ?? target.channel) : target.name;
   return (
     <div
-      className={`player${controls || menu || editing ? " player--controls" : ""}${editing ? " player--editing" : ""}`}
+      className={`player${controls || menu || editing ? " player--controls" : ""}${editing ? " player--editing" : ""}${docked ? " player--docked" : ""}`}
+      style={docked ? ({ "--dock-w": `${chat.dockW}%` } as CSSProperties) : undefined}
       onMouseMove={poke}
       onClick={() => menu && closeMenu()}
     >
@@ -552,9 +579,29 @@ export function PlayerLayer() {
               <Icon name="layout" /> Layout
             </button>
           )}
-          <button className="btn btn--ghost btn--icon" onClick={() => setMuted((m) => !m)} title={muted ? "Unmute" : "Mute"}>
-            <Icon name={muted ? "mute" : "sound"} />
-          </button>
+          <div className="volume">
+            <button className="btn btn--ghost btn--icon" onClick={() => setMuted((m) => !m)} title={muted ? "Unmute" : "Mute"}>
+              <Icon name={muted || volume === 0 ? "mute" : "sound"} />
+            </button>
+            {!isTv && (
+              <input
+                className="volume__slider"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={muted ? 0 : volume}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setVolume(v);
+                  setMuted(v === 0);
+                }}
+                style={{ "--level": `${(muted ? 0 : volume) * 100}%` } as CSSProperties}
+                aria-label="Volume"
+                title={`Volume ${Math.round((muted ? 0 : volume) * 100)} %`}
+              />
+            )}
+          </div>
           {channel && qualities.length > 0 && (
             <select className="select" value={quality} onChange={(e) => setQuality(Number(e.target.value))}>
               <option value={-1}>Auto</option>
@@ -601,7 +648,6 @@ export function PlayerLayer() {
           inView={inView}
           titles={titles}
           onWatch={(login) => {
-            closeMenu();
             if (login !== channel) play(login);
           }}
           onAdd={add}
@@ -616,10 +662,13 @@ export function PlayerLayer() {
               : null
           }
           onAdjustChat={(a) => {
+            adjustFrom.current = `adjust:${a}`;
             setMenu(null);
             setChatAdjust(a);
           }}
           full={full}
+          focused={sessionId ? focusedChannel : null}
+          initialFocus={menuFocus}
         />
       )}
     </div>

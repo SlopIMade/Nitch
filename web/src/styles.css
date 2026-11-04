@@ -18,8 +18,8 @@
   --accent-2: #a970ff;
   --live: #e91916;
   --danger: #c62828;
-  --r-control: 6px;
-  --r-card: 10px;
+  --r-control: 3px;
+  --r-card: 4px;
   --control-h: 2.5rem;
   --gap: 0.5rem;
   --header-h: 3.6rem;
@@ -167,7 +167,7 @@ h2 {
   align-items: center;
   gap: 0.3em;
   padding: 0.15rem 0.4rem;
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -578,13 +578,72 @@ h2 {
 .player__bar--top {
   top: 0;
   align-items: flex-start;
-  background: linear-gradient(rgba(0, 0, 0, 0.75), transparent);
+  padding-bottom: 2.5rem;
+  background: linear-gradient(rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0.6) 55%, transparent);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95), 0 0 8px rgba(0, 0, 0, 0.7);
+}
+
+.player__bar--top .muted,
+.player__bar--top .player__subtitle {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .player__bar--bottom {
   bottom: 0;
   flex-wrap: wrap;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.75));
+  padding-top: 2.5rem;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.6) 45%, rgba(0, 0, 0, 0.88));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+
+.player__bar--bottom .player__keys {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* Docked chat: the picture (and the bars over it) make room at the right edge. */
+.player--docked {
+  padding-right: var(--dock-w);
+}
+
+.player--docked .player__bar {
+  right: var(--dock-w);
+}
+
+.player--docked .ad-badge {
+  right: calc(var(--dock-w) + 1.25rem);
+}
+
+/* Volume: the mute button and, with a mouse or touch, a slider. */
+.volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.volume__slider {
+  width: 7rem;
+  height: 0.3rem;
+  margin: 0;
+  appearance: none;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent-2) var(--level), rgba(255, 255, 255, 0.25) var(--level));
+  cursor: pointer;
+}
+
+.volume__slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.volume__slider::-moz-range-thumb {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
 }
 
 .player__bar .btn--ghost {
@@ -703,7 +762,7 @@ h2 {
   align-items: center;
   gap: 0.4em;
   padding: 0.2em 0.5em;
-  border-radius: 4px;
+  border-radius: 2px;
   background: rgba(0, 0, 0, 0.6);
   font-size: clamp(8px, 5.5cqh, 0.85rem);
   white-space: nowrap;
@@ -808,7 +867,7 @@ h2 {
   top: 0.4rem;
   padding: 0.2rem 0.5rem;
   border: 0;
-  border-radius: 4px;
+  border-radius: 2px;
   background: rgba(0, 0, 0, 0.7);
   color: var(--text);
   font: inherit;
@@ -972,6 +1031,16 @@ h2 {
   cursor: default;
 }
 
+.menu-entry__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.menu-entry--active .menu-entry__title {
+  color: var(--accent-2);
+}
+
 .menu-entry__sub {
   max-width: 100%;
   color: var(--muted);
@@ -1005,7 +1074,7 @@ h2 {
   height: 2.1rem;
   padding: 0 0.8rem;
   border: 0;
-  border-radius: 4px;
+  border-radius: 2px;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -1046,6 +1115,89 @@ h2 {
 .chip--off {
   opacity: 0.45;
   text-decoration: line-through;
+}
+
+/* The chat's quick places as a small screen: corners, and a full-height column at each side. */
+.places {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.6rem 3.2rem 1fr 3.2rem 1.6rem;
+  grid-template-rows: 2.2rem 1fr 2.2rem;
+  gap: 0.3rem;
+  width: 100%;
+  max-width: 19rem;
+  height: 8.5rem;
+  margin-top: 0.6rem;
+  padding: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-control);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.places__picture {
+  grid-column: 2 / 5;
+  grid-row: 2;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.place {
+  display: grid;
+  padding: 0.25rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-control);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+}
+
+.place:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.place__mark {
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.place--on {
+  border-color: var(--accent-2);
+}
+
+.place--on .place__mark {
+  background: var(--accent-2);
+}
+
+.place--left {
+  grid-column: 1;
+  grid-row: 1 / 4;
+}
+
+.place--right {
+  grid-column: 5;
+  grid-row: 1 / 4;
+}
+
+.place--tl {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.place--tr {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.place--bl {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.place--br {
+  grid-column: 4;
+  grid-row: 3;
 }
 
 .stepper {
@@ -1109,6 +1261,36 @@ h2 {
   outline: 2px dashed var(--accent-2);
 }
 
+.chat--docked {
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.chat--docked .chat__bg {
+  border-radius: 0;
+}
+
+.chat--docked .chat__grip {
+  cursor: default;
+  padding-top: 0.6em;
+}
+
+/* Docked: the left edge sets the width. */
+.chat__edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.chat__edge:hover,
+.chat--adjusting .chat__edge {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 /* The top edge: drag handle (mouse), the channels shown, and a settings button on hover. */
 .chat__grip {
   display: flex;
@@ -1134,7 +1316,7 @@ h2 {
   place-items: center;
   padding: 0.15em;
   border: 0;
-  border-radius: 4px;
+  border-radius: 2px;
   background: transparent;
   color: inherit;
   font: inherit;
@@ -1210,7 +1392,7 @@ h2 {
   left: 0.5em;
   bottom: 0.4em;
   padding: 0.15em 0.6em;
-  border-radius: 4px;
+  border-radius: 2px;
   background: var(--accent);
   font-size: 0.8em;
 }

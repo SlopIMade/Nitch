@@ -1,13 +1,23 @@
 // The player's side menu: add streams to what's playing, and the chat settings. Opened with a
 // long press of Left on the remote or the menu button (mouse). For the remote, OK on a stream
-// watches it alone, a long press of OK (or the + button) adds it to the view.
+// watches it alone, a long press of OK (or the + button) adds it to the view. Actions don't close
+// it (zap through channels, add several streams, adjust the chat step by step); Back does.
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { api, formatViewers } from "../api";
 import { Icon } from "../components/Icon";
 import { installBackHandler, pressKind } from "../tv";
-import { CHAT_PLACES, channelColor, resetChat, updateChat, useChatSettings, type ChatMode } from "./chatSettings";
+import {
+  CHAT_PLACES,
+  channelColor,
+  chatPlace,
+  resetChatPlace,
+  updateChat,
+  useChatSettings,
+  type ChatMode,
+  type ChatPlace,
+} from "./chatSettings";
 import type { ChatAdjust } from "./ChatOverlay";
 
 export type MenuTab = "add" | "chat";
@@ -25,17 +35,23 @@ function Entry({
   longLabel,
   children,
   disabled,
+  focusKey,
+  active,
 }: {
   onShort: () => void;
   onLong?: () => void;
   longLabel?: string;
   children: ReactNode;
   disabled?: boolean;
+  /** Finds the entry again after the lists changed (see SideMenu). */
+  focusKey?: string;
+  active?: boolean;
 }) {
   return (
-    <div className="menu-entry">
+    <div className={`menu-entry${active ? " menu-entry--active" : ""}`}>
       <button
         className="menu-entry__main"
+        data-focus-key={focusKey}
         disabled={disabled}
         onClick={(e) => e.detail > 0 && onShort()}
         onKeyDown={(e) => pressKind(e, "Enter", onLong ?? onShort)}
@@ -74,6 +90,7 @@ function StreamList({
       {streams.map((s) => (
         <Entry
           key={s.login}
+          focusKey={`stream:${s.login}`}
           disabled={!s.live}
           onShort={() => onWatch(s.login)}
           onLong={canAdd ? () => onAdd(s.login) : undefined}
@@ -103,8 +120,10 @@ function AddTab({
   onFocusTile,
   onEditLayout,
   full,
+  focused,
 }: {
   inView: string[];
+  focused: string | null;
   titles: string[];
   onWatch: (login: string) => void;
   onAdd: (login: string) => void;
@@ -125,6 +144,10 @@ function AddTab({
   const tagged = mentions(titles).filter((c) => !inView.includes(c));
   const tagInfo = useQueries({
     queries: tagged.map((login) => ({ queryKey: ["channel", login], queryFn: () => api.channel(login), staleTime: 60_000 })),
+  });
+  // What the streams in view are playing (the player loads the same queries).
+  const viewInfo = useQueries({
+    queries: inView.map((login) => ({ queryKey: ["channel", login], queryFn: () => api.channel(login), staleTime: 60_000 })),
   });
 
   const notInView = (s: Stream) => !inView.includes(s.login);
@@ -152,12 +175,37 @@ function AddTab({
       {inView.length > 0 && (
         <section className="sidemenu__section">
           <h3>In this view</h3>
-          {inView.map((c) => (
-            <Entry key={c} onShort={() => onFocusTile(c)} onLong={onRemove ? () => onRemove(c) : undefined} longLabel="Remove">
-              <strong>{c}</strong>
-              <span className="menu-entry__sub">{onRemove ? "OK: listen · hold OK or ✕: remove" : "playing"}</span>
-            </Entry>
-          ))}
+          {onRemove && (
+            <p className="sidemenu__hint">
+              OK: listen · hold OK or <Icon name="trash" />: remove
+            </p>
+          )}
+          {inView.map((c, i) => {
+            const info = viewInfo[i]?.data;
+            return (
+              <Entry
+                key={c}
+                focusKey={`view:${c}`}
+                active={c === focused && inView.length > 1}
+                onShort={() => onFocusTile(c)}
+                onLong={onRemove ? () => onRemove(c) : undefined}
+                longLabel="Remove"
+              >
+                <strong className="menu-entry__title">
+                  {c === focused && inView.length > 1 && <Icon name="sound" />}
+                  {info?.display_name ?? c}
+                </strong>
+                <span className="menu-entry__sub">
+                  {info ? (info.live ? info.live.game : "offline") : ""}
+                  {info?.live && (
+                    <span className="menu-entry__viewers">
+                      <Icon name="viewers" /> {formatViewers(info.live.viewers)}
+                    </span>
+                  )}
+                </span>
+              </Entry>
+            );
+          })}
           {onEditLayout && (
             <button className="btn btn--ghost btn--small" onClick={onEditLayout}>
               Edit layout…
@@ -166,6 +214,32 @@ function AddTab({
         </section>
       )}
     </>
+  );
+}
+
+/** The quick places as a picture of the screen: a button in each corner, a column at each side. */
+function PlaceSquare({ current }: { current: ChatPlace | null }) {
+  const place = (k: ChatPlace, extra: string) => (
+    <button
+      className={`place place--${extra}${current === k ? " place--on" : ""}`}
+      data-focus-key={`place:${k}`}
+      onClick={() => updateChat(CHAT_PLACES[k].rect)}
+      title={CHAT_PLACES[k].label}
+      aria-label={CHAT_PLACES[k].label}
+    >
+      <span className="place__mark" />
+    </button>
+  );
+  return (
+    <div className="places">
+      {place("left", "left")}
+      {place("topLeft", "tl")}
+      {place("topRight", "tr")}
+      {place("bottomLeft", "bl")}
+      {place("bottomRight", "br")}
+      {place("right", "right")}
+      <span className="places__picture">picture</span>
+    </div>
   );
 }
 
@@ -240,25 +314,42 @@ function ChatTab({ all, onAdjust }: { all: string[]; onAdjust: (a: ChatAdjust) =
       </section>
       <section className="sidemenu__section">
         <h3>Place</h3>
-        <div className="chips">
-          {CHAT_PLACES.map((p) => (
-            <button key={p.label} className="chip" onClick={() => updateChat(p.rect)}>
-              {p.label}
-            </button>
-          ))}
+        <div className="seg">
+          <button className={`seg__btn${!s.dock ? " seg__btn--on" : ""}`} data-focus-key="dock:off" onClick={() => updateChat({ dock: false })}>
+            Over the picture
+          </button>
+          <button className={`seg__btn${s.dock ? " seg__btn--on" : ""}`} data-focus-key="dock:on" onClick={() => updateChat({ dock: true })}>
+            Beside it
+          </button>
         </div>
+        {!s.dock && <PlaceSquare current={chatPlace(s)} />}
+      </section>
+      <section className="sidemenu__section">
+        <h3>Adjust</h3>
         <div className="chips">
-          <button className="chip" onClick={() => onAdjust("move")}>
-            Move with arrows
-          </button>
-          <button className="chip" onClick={() => onAdjust("size")}>
-            Resize with arrows
-          </button>
-          <button className="chip" onClick={resetChat}>
+          {s.dock ? (
+            <button className="chip" data-focus-key="adjust:size" onClick={() => onAdjust("size")}>
+              Width with arrows
+            </button>
+          ) : (
+            <>
+              <button className="chip" data-focus-key="adjust:move" onClick={() => onAdjust("move")}>
+                Move with arrows
+              </button>
+              <button className="chip" data-focus-key="adjust:size" onClick={() => onAdjust("size")}>
+                Resize with arrows
+              </button>
+            </>
+          )}
+          <button className="chip" onClick={resetChatPlace}>
             Reset
           </button>
         </div>
-        <p className="sidemenu__hint">With a mouse: drag the chat's top edge or its corner; Ctrl + wheel for text size.</p>
+        <p className="sidemenu__hint">
+          {s.dock
+            ? "With a mouse: drag the chat's left edge; Ctrl + wheel for text size."
+            : "With a mouse: drag the chat's top edge or its corner; Ctrl + wheel for text size."}
+        </p>
       </section>
     </>
   );
@@ -277,9 +368,15 @@ export function SideMenu(props: {
   onEditLayout: (() => void) | null;
   onAdjustChat: (a: ChatAdjust) => void;
   full: boolean;
+  focused: string | null;
+  /** The entry to focus on opening (`data-focus-key`), e.g. the button that started an adjustment. */
+  initialFocus?: string | null;
 }) {
-  const { tab, onTab, onClose } = props;
+  const { tab, onTab, onClose, initialFocus } = props;
   const box = useRef<HTMLDivElement>(null);
+  // The focused entry's key: after an action changed the lists (a stream moved from "Followed" to
+  // "In this view"), the focus finds the same entry again.
+  const lastKey = useRef<string | null>(initialFocus ?? null);
 
   // Back or Escape closes the menu (before anything else handles them).
   useEffect(() => {
@@ -303,13 +400,34 @@ export function SideMenu(props: {
   // The focus belongs in the menu: on opening, on switching tabs, and whenever it got lost (a
   // list that loaded late, an entry that went away), it goes to the first entry.
   const focusFirst = () => {
+    const key = lastKey.current;
+    if (key) {
+      // The same entry, or the same channel in another list.
+      const login = key.split(":")[1];
+      const el =
+        box.current?.querySelector<HTMLElement>(`[data-focus-key="${CSS.escape(key)}"]:not(:disabled)`) ??
+        box.current?.querySelector<HTMLElement>(`[data-focus-key$=":${CSS.escape(login)}"]:not(:disabled)`);
+      if (el) {
+        el.focus();
+        return;
+      }
+    }
     const first = box.current?.querySelector<HTMLElement>(".sidemenu__body button:not(:disabled)");
     (first ?? box.current?.querySelector<HTMLElement>(".sidemenu__tab--on"))?.focus();
   };
   // Until the user moves, the focus follows the first entry (lists load in after opening).
   const moved = useRef(false);
+  const shownTab = useRef(tab);
   useLayoutEffect(() => {
-    moved.current = false;
+    if (shownTab.current !== tab) {
+      // Switching tabs starts at the top.
+      shownTab.current = tab;
+      lastKey.current = null;
+      moved.current = false;
+    } else {
+      // Opened at a given entry: stay there.
+      moved.current = !!lastKey.current;
+    }
     focusFirst();
   }, [tab]);
   useEffect(() => {
@@ -337,6 +455,9 @@ export function SideMenu(props: {
         if (e.key.startsWith("Arrow")) moved.current = true;
       }}
       onPointerDown={() => (moved.current = true)}
+      onFocus={(e) => {
+        lastKey.current = (e.target as HTMLElement).dataset.focusKey ?? null;
+      }}
     >
       <div className="sidemenu__tabs">
         <button className={`sidemenu__tab${tab === "add" ? " sidemenu__tab--on" : ""}`} onClick={() => onTab("add")}>

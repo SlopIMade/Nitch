@@ -6,10 +6,15 @@ import { useSyncExternalStore } from "react";
 export type ChatMode = "off" | "focused" | "combined";
 export type ChatSettings = {
   mode: ChatMode;
+  /** Over the picture: anywhere on the screen. */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** Beside the picture: a column at the right edge, the picture shrinks next to it. */
+  dock: boolean;
+  /** Its width, percent of the screen. */
+  dockW: number;
   /** Text size in rem. */
   font: number;
   /** Background opacity. */
@@ -21,7 +26,19 @@ export type ChatSettings = {
 };
 
 const KEY = "nitch.chat.v2";
-export const CHAT_DEFAULTS: ChatSettings = { mode: "focused", x: 76, y: 4, w: 22, h: 70, font: 0.85, opacity: 0.45, text: 1, exclude: [] };
+export const CHAT_DEFAULTS: ChatSettings = {
+  mode: "focused",
+  x: 76,
+  y: 4,
+  w: 22,
+  h: 70,
+  dock: false,
+  dockW: 24,
+  font: 0.85,
+  opacity: 0.45,
+  text: 1,
+  exclude: [],
+};
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const round = (v: number) => Math.round(v * 100) / 100;
 
@@ -44,6 +61,7 @@ export function updateChat(patch: Partial<ChatSettings> | ((s: ChatSettings) => 
   n.h = clamp(n.h, 12, 100);
   n.x = clamp(n.x, 0, 100 - n.w);
   n.y = clamp(n.y, 0, 100 - n.h);
+  n.dockW = clamp(n.dockW, 12, 50);
   n.font = round(clamp(n.font, 0.5, 2.5));
   n.opacity = round(clamp(n.opacity, 0, 0.95));
   n.text = round(clamp(n.text, 0.3, 1));
@@ -56,6 +74,12 @@ export function resetChat() {
   updateChat(CHAT_DEFAULTS);
 }
 
+/** Back to the default place and size (the look and the mode stay). */
+export function resetChatPlace() {
+  const { x, y, w, h, dockW } = CHAT_DEFAULTS;
+  updateChat({ x, y, w, h, dockW });
+}
+
 export function useChatSettings(): ChatSettings {
   return useSyncExternalStore(
     (l) => {
@@ -66,13 +90,27 @@ export function useChatSettings(): ChatSettings {
   );
 }
 
-/** Quick positions for the remote (and the mouse): a column at either side, or a strip at the bottom. */
-export const CHAT_PLACES: { label: string; rect: Pick<ChatSettings, "x" | "y" | "w" | "h"> }[] = [
-  { label: "Right", rect: { x: 76, y: 4, w: 22, h: 70 } },
-  { label: "Left", rect: { x: 2, y: 4, w: 22, h: 70 } },
-  { label: "Right, full height", rect: { x: 78, y: 0, w: 22, h: 100 } },
-  { label: "Bottom left", rect: { x: 2, y: 60, w: 30, h: 36 } },
-];
+export type ChatRect = Pick<ChatSettings, "x" | "y" | "w" | "h">;
+
+/** Quick places over the picture: the four corners and a full-height column at either side. */
+export const CHAT_PLACES = {
+  topLeft: { label: "Top left", rect: { x: 2, y: 4, w: 22, h: 45 } },
+  topRight: { label: "Top right", rect: { x: 76, y: 4, w: 22, h: 45 } },
+  bottomRight: { label: "Bottom right", rect: { x: 76, y: 51, w: 22, h: 45 } },
+  bottomLeft: { label: "Bottom left", rect: { x: 2, y: 51, w: 22, h: 45 } },
+  left: { label: "Left, full height", rect: { x: 0, y: 0, w: 22, h: 100 } },
+  right: { label: "Right, full height", rect: { x: 78, y: 0, w: 22, h: 100 } },
+} satisfies Record<string, { label: string; rect: ChatRect }>;
+
+export type ChatPlace = keyof typeof CHAT_PLACES;
+
+/** The place the chat is at, if it's exactly one of the quick places. */
+export function chatPlace(s: ChatSettings): ChatPlace | null {
+  for (const [k, p] of Object.entries(CHAT_PLACES)) {
+    if (p.rect.x === s.x && p.rect.y === s.y && p.rect.w === s.w && p.rect.h === s.h) return k as ChatPlace;
+  }
+  return null;
+}
 
 /** A stable color per channel (stripe and label in the combined chat). */
 export function channelColor(channel: string): string {

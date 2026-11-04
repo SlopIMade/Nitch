@@ -66,28 +66,38 @@ export function moveFocus(dir: Dir): boolean {
     return all.length > 0;
   }
   const a = current.getBoundingClientRect();
-  const ax = a.left + a.width / 2;
-  const ay = a.top + a.height / 2;
+  const vertical = dir === "up" || dir === "down";
+  // Only elements that lie in the direction, judged by their edges (not just centers), with the
+  // gap between the edges.
+  const ahead = all.flatMap((el) => {
+    if (el === current) return [];
+    const b = el.getBoundingClientRect();
+    const gap = dir === "down" ? b.top - a.bottom : dir === "up" ? a.top - b.bottom : dir === "right" ? b.left - a.right : a.left - b.right;
+    return gap >= -4 ? [{ el, b, gap: Math.max(0, gap) }] : [];
+  });
+  // How far apart two boxes are across the direction (0 when they overlap).
+  const apart = (b: DOMRect) =>
+    vertical ? Math.max(0, b.left - a.right, a.left - b.right) : Math.max(0, b.top - a.bottom, a.top - b.bottom);
+  const centerOff = (b: DOMRect) =>
+    vertical ? Math.abs(b.left + b.width / 2 - (a.left + a.width / 2)) : Math.abs(b.top + b.height / 2 - (a.top + a.height / 2));
+  let pool = ahead;
+  if (vertical) {
+    // Up and down go to the next row (the nearest edge), and there to the closest element:
+    // a menu's next line, not a button further down that happens to be straight below.
+    const nearest = Math.min(...ahead.map((c) => c.gap));
+    pool = ahead.filter((c) => c.gap <= nearest + 8);
+  } else {
+    // Left and right stay in the row: at its end they go nowhere (instead of jumping into
+    // another row).
+    pool = ahead.filter((c) => apart(c.b) === 0);
+  }
   let best: HTMLElement | null = null;
   let bestScore = Infinity;
-  for (const el of all) {
-    if (el === current) continue;
-    const b = el.getBoundingClientRect();
-    const bx = b.left + b.width / 2;
-    const by = b.top + b.height / 2;
-    const dx = bx - ax;
-    const dy = by - ay;
-    // Only elements that lie in the direction, judged by their edges (not just centers).
-    const inDir =
-      dir === "right" ? b.left >= a.right - 4 : dir === "left" ? b.right <= a.left + 4 : dir === "down" ? b.top >= a.bottom - 4 : b.bottom <= a.top + 4;
-    if (!inDir) continue;
-    // Distance along the direction plus a penalty for drifting sideways.
-    const main = dir === "left" || dir === "right" ? Math.abs(dx) : Math.abs(dy);
-    const side = dir === "left" || dir === "right" ? Math.abs(dy) : Math.abs(dx);
-    const score = main + side * 2;
+  for (const c of pool) {
+    const score = vertical ? apart(c.b) * 4 + centerOff(c.b) : c.gap + apart(c.b) * 2 + centerOff(c.b) * 0.5;
     if (score < bestScore) {
       bestScore = score;
-      best = el;
+      best = c.el;
     }
   }
   if (!best) return false;
