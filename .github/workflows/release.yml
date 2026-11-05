@@ -31,7 +31,12 @@ jobs:
         with:
           distribution: temurin
           java-version: 25
-      - uses: android-actions/setup-android@v3
+      - name: Android SDK licenses
+        # The runner image has the SDK ($ANDROID_HOME); the Android Gradle plugin installs the
+        # missing platform itself once the licenses are accepted.
+        run: |
+          sdkmanager=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
+          yes | "$sdkmanager" --licenses > /dev/null
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: 9.8.2

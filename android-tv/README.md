@@ -22,6 +22,10 @@ gradle wrapper --gradle-version 9.8.2   # once, creates gradlew (needs a Gradle 
 .\gradlew.bat assembleDebug             # → app\build\outputs\apk\debug\app-debug.apk
 ```
 
+Signed release builds come from the release workflow on a version tag (see
+[DEVELOPMENT.md → Releases](../docs/DEVELOPMENT.md#releases)): it passes `-PnitchVersion=X.Y.Z` and
+the signing key through `NITCH_KEYSTORE_FILE`, `NITCH_KEYSTORE_PASSWORD` and `NITCH_KEY_PASSWORD`.
+
 Versions: Gradle 9.8.2 (pinned in `gradle/wrapper/gradle-wrapper.properties` with its checksum),
 Android Gradle plugin 9.4.0 (the newest Android Studio supports) with its built-in Kotlin support, compile/target SDK 37, min SDK 26,
 JDK from Android Studio.
