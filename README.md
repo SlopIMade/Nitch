@@ -91,6 +91,10 @@ spikes/       Early experiments, each with FINDINGS.md
 scripts/      Development environment setup and checks
 ```
 
+## License
+
+[MIT](LICENSE)
+
 ## Disclaimer
 
 Nitch is an unofficial project and is not affiliated with or endorsed by Twitch. Use it at your
