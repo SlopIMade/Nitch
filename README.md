@@ -58,13 +58,14 @@ multiview with chat next to it.
 ## Quick start
 
 1. Register a Twitch app, copy `.env.example` to `.env` and fill in its Client ID and secret.
-2. Start it:
+2. Start it (the image comes from Docker Hub, `slopimade/nitch`):
 
    ```bash
-   docker compose -f deploy/compose.yaml up -d --build
+   docker compose -f deploy/compose.yaml up -d
    ```
 
 3. Open `http://<server>:8080` and log in with your phone.
+4. On the TV: install the APK from the [latest release](https://github.com/SlopIMade/Nitch/releases/latest).
 
 Full guide (Twitch app, options, hardware encoding, TV app): [docs/INSTALL.md](docs/INSTALL.md).
 Development setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).

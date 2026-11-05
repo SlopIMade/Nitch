@@ -1,23 +1,27 @@
-# Run from the repository root:
-#   docker compose -f deploy/compose.yaml up -d --build
-# Credentials come from ../.env (see .env.example).
+# Nitch from Docker Hub. Put this file and your .env (see .env.example) in one folder, or run it
+# from the repository root:
+#   docker compose -f deploy/compose.yaml up -d
+# To build the image from source instead, add deploy/compose.build.yaml:
+#   docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml up -d --build
 
 services:
   nitch:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: nitch:latest
-    # Host networking: reachable on the LAN without port mapping, and needed for mDNS
-    # discovery by the TV app later (M5).
+    image: slopimade/nitch:latest
+    # Host networking: reachable on the LAN without port mapping, and the mDNS announcement
+    # reaches the TV app.
     network_mode: host
-    env_file: ../.env
+    env_file:
+      # Next to this file, or at the repository root.
+      - path: .env
+        required: false
+      - path: ../.env
+        required: false
     environment:
       NITCH_BIND: ${NITCH_BIND:-0.0.0.0:8080}
     volumes:
       - nitch-data:/data
     restart: unless-stopped
-    # Hardware video encoding (M4), once the target VM exposes VA-API:
+    # Hardware video encoding: pass the GPU through and set NITCH_ENCODER=va in .env.
     # devices:
     #   - /dev/dri:/dev/dri
 

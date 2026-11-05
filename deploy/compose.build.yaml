@@ -1,0 +1,9 @@
+# Builds the image from this repository instead of pulling it (add after compose.yaml):
+#   docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml up -d --build
+
+services:
+  nitch:
+    image: nitch:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile

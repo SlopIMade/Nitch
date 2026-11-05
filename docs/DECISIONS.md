@@ -363,3 +363,15 @@ values come from `.env`; the image is built on the server.
   button straight below it (the chat menu's "Place" instead of "Look").
 - Volume: a slider next to mute on desktop and mobile; on the TV its own volume keys do that.
 
+### D34 — Releases from version tags: Docker Hub and a signed APK
+*2026-11-05*
+
+A tag `vX.Y.Z` builds the image and the TV app in GitHub Actions. The image goes to Docker Hub
+(`slopimade/nitch`, x86-64 only: home servers and VMs; ARM would need emulated builds and has only
+software encoding), the APK to a GitHub release. The APK is signed with one release key kept in
+the repository's secrets (created by `scripts/create-apk-key.ps1`, which the maintainer runs, so
+the key never passes through anyone else); its versionCode is derived from the version, so updates
+install over the previous one. Pushes to `main` only run the CI checks; nothing is published
+without a tag. Users pull the image (`deploy/compose.yaml`); building from source stays possible
+(`deploy/compose.build.yaml`).
+

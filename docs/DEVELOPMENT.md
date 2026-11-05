@@ -131,3 +131,29 @@ free -h
 - the hypervisor (Proxmox, libvirt/virt-manager, plain QEMU, …)
 - the host's APU model
 - how many cores and how much RAM the VM gets
+
+## Releases
+
+A version tag publishes a release (`.github/workflows/release.yml`):
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+- **Docker Hub:** the image as `slopimade/nitch:0.2.0`, `:0.2` and `:latest` (x86-64). Tags with a
+  suffix (`v0.3.0-rc1`) are pre-releases and don't move `:latest`.
+- **GitHub release:** `nitch-tv-0.2.0.apk`, signed with the release key; its versionCode comes
+  from the version (0.2.0 → 200), so Android installs it over the previous one.
+- **Test run:** Actions → Release → Run workflow builds both without publishing anything.
+
+Secrets, set once (Settings → Secrets and variables → Actions):
+
+- `NITCH_KEYSTORE_BASE64`, `NITCH_KEYSTORE_PASSWORD`, `NITCH_KEY_PASSWORD`: run
+  `.\scripts\create-apk-key.ps1 -Out <a safe folder>`. It creates the key, stores it as secrets and
+  leaves the key and its password in that folder. Back them up: without the key, the next APK
+  can't update the installed one.
+- `DOCKERHUB_TOKEN`: a Docker Hub access token (Account settings → Personal access tokens,
+  Read & Write) for the `slopimade` account: `gh secret set DOCKERHUB_TOKEN --repo SlopIMade/Nitch`
+  asks for it.
+

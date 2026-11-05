@@ -38,8 +38,17 @@ Optional settings (environment variables):
 
 ## 3. Start
 
+The image is on Docker Hub (`slopimade/nitch`, x86-64). Put `deploy/compose.yaml` and your `.env`
+in one folder (or use the repository as it is) and start it:
+
 ```bash
-docker compose -f deploy/compose.yaml up -d --build
+docker compose -f deploy/compose.yaml up -d
+```
+
+To build the image from source instead:
+
+```bash
+docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml up -d --build
 ```
 
 - **Host networking:** the compose file uses it, so the server is reachable on the LAN without port
@@ -56,14 +65,17 @@ The server holds the Twitch login, and any device on the network can use it.
 
 ## 4. The TV app
 
-1. Build the APK once (see `android-tv/README.md`): open `android-tv/` in Android Studio and press
-   Run, or use `gradlew assembleDebug`.
+1. Download `nitch-tv-<version>.apk` from the
+   [latest release](https://github.com/SlopIMade/Nitch/releases/latest), or build it yourself (see
+   `android-tv/README.md`).
 2. Install it on the TV: enable developer options and network ADB, then:
 
    ```powershell
    adb connect <tv-ip>:5555
-   adb install -r android-tv\app\build\outputs\apk\debug\app-debug.apk
+   adb install -r nitch-tv-<version>.apk
    ```
+
+   Or copy it to the TV (USB stick, a file-sending app) and open it with a file manager.
 
 3. Open **Nitch** from the TV's app row. It lists the servers it finds on the network. Otherwise
    enter the address (e.g. `192.168.1.10:8080`).
@@ -94,8 +106,10 @@ must exist), `NITCH_RENDER_GID` and `NITCH_VIDEO_GID` (`getent group render vide
 ## Updating
 
 ```bash
-git pull
-docker compose -f deploy/compose.yaml up -d --build
+docker compose -f deploy/compose.yaml pull
+docker compose -f deploy/compose.yaml up -d
 ```
+
+Built from source: `git pull`, then the build command from step 3 again.
 
 The TV app doesn't need updating for UI changes: it loads the web app from the server.
