@@ -34,3 +34,6 @@ Thumbs.db
 
 # GPU driver packages for the image (deploy/debs/README.md)
 deploy/debs/*.deb
+
+# Local tool settings (e.g. preview launch configs with local addresses)
+.claude/

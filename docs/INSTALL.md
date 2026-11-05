@@ -68,16 +68,17 @@ The server holds the Twitch login, and any device on the network can use it.
 3. Open **Nitch** from the TV's app row. It lists the servers it finds on the network. Otherwise
    enter the address (e.g. `192.168.1.10:8080`).
 
-## On the home server VM (Debian 13, data on the NAS)
+## Example: a home server with an NFS share and VA-API
 
-The stack in `deploy/stack.yaml` is set up for it (D32): host networking, VA-API on the virtio GPU,
-the data on the NAS (`/export/nitch`, the folder must exist), the multiview
-output in memory.
+`deploy/stack.yaml` is a template for this (D32): host networking, VA-API through `/dev/dri`,
+the data on an NFS share, the multiview output in memory. Everything machine-specific comes
+from `.env` (or Portainer's stack variables): `NITCH_NFS_ADDR` and `NITCH_NFS_PATH` (the folder
+must exist), `NITCH_RENDER_GID` and `NITCH_VIDEO_GID` (`getent group render video`).
 
-1. Copy the repository to the VM (e.g. `~/nitch`) and put the VM's Mesa build with the AMD virtio
-   driver into `deploy/debs/`: the `…+virtio_amd64.deb` packages `mesa-va-drivers`,
-   `mesa-libgallium`, `libegl-mesa0`, `libgbm1`, `libglx-mesa0` and `libgl1-mesa-dri` (all of them:
-   they require each other's exact version).
+1. Copy the repository to the server (e.g. `~/nitch`). If its GPU needs a Mesa build of its own,
+   e.g. a VM's virtio GPU in AMD native-context mode, put those packages into `deploy/debs/`:
+   `mesa-va-drivers`, `mesa-libgallium`, `libegl-mesa0`, `libgbm1`, `libglx-mesa0` and
+   `libgl1-mesa-dri` (all of them: they require each other's exact version).
 2. Build the image and start the stack:
 
    ```bash
@@ -86,7 +87,7 @@ output in memory.
    ```
 
    In Portainer, the stack can be created from the same file instead (Twitch credentials as stack
-   environment variables); the image has to be built on the VM first.
+   environment variables); the image has to be built on the server first.
 3. Check: `sudo docker exec nitch-nitch-1 vainfo --display drm --device /dev/dri/renderD128` lists
    `VAEntrypointEncSlice` for H.264, and the log says `encoder=Va`.
 

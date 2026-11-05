@@ -188,7 +188,7 @@ same moments.
 ### D21 — Private GitHub repository
 *2026-11-03*
 
-The repository is pushed to `SlopIMade/Nitch`, a **private** repo the user created; `main` is
+The repository is pushed to `SlopIMade/Nitch`, a **private** repo for now; `main` is
 the default branch. Before the first push, the whole history was scanned: no credentials, tokens,
 signed Twitch URLs or session IDs. Raw recordings (`data/`) and `.env` stay git-ignored.
 Replaces "local git only" from D9. CI comes in M7.
@@ -332,20 +332,20 @@ channels (up to 50, refreshed every minute; anonymous IRC, cheap) and keeps the 
 of every chat it reads. A client subscribing to a channel first gets `chat_history`, so the chat
 opens with what was said. Limit: a channel opened from search, without following it, starts empty.
 
-### D32 — The image is Debian 13, like the target VM; data on the NAS
+### D32 — The image is Debian 13, like the target VM; data on NFS
 *2026-11-04*
 
 The target VM runs Debian 13 with a virtio GPU in AMD native-context mode. VA-API there decodes
-and encodes H.264, but only with a Mesa built with the AMD virtio driver (the VM's own
-`+virtio` packages; Debian's Mesa lacks it). So the image is Debian 13 as well, with Mesa
-from trixie-backports, and driver packages placed in `deploy/debs/` (git-ignored) replace
-Debian's at build time. The image's GStreamer is 1.26, dev stays on 1.24 (Ubuntu 24.04, D11).
+and encodes H.264, but only with a Mesa built with the AMD virtio driver (Debian's Mesa lacks
+it). So the image is Debian 13 as well, with Mesa from trixie-backports, and driver packages
+placed in `deploy/debs/` (git-ignored) replace Debian's at build time. The image's GStreamer is
+1.26, dev stays on 1.24 (Ubuntu 24.04, D11).
 
-Data follows the server's convention: an NFS volume on the NAS
-(`/export/nitch`), the multiview output in a tmpfs, since it is rewritten
-every second and only needed for a minute. SQLite keeps WAL, but in exclusive locking mode, so it
-needs no shared-memory file (which doesn't work on NFS); a second server on the same data fails
-at once instead of corrupting it. The stack is `deploy/stack.yaml`; the image is built on the VM.
+The data lives on an NFS share, the multiview output in a tmpfs, since it is rewritten every
+second and only needed for a minute. SQLite keeps WAL, but in exclusive locking mode, so it needs
+no shared-memory file (which doesn't work on NFS); a second server on the same data fails at once
+instead of corrupting it. The stack is `deploy/stack.yaml`, a template whose machine-specific
+values come from `.env`; the image is built on the server.
 
 ### D33 — Chat beside the picture; a side menu that stays open; navigation by rows
 *2026-11-05*

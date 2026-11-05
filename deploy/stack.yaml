@@ -1,8 +1,11 @@
-# Nitch on the home server VM (Debian 13, Docker, managed in Portainer): see docs/INSTALL.md.
-# The image is built on the VM (docker build -t nitch:latest -f deploy/Dockerfile .);
-# the data lives on the NAS, the multiview output in memory.
+# Nitch on a home server (Docker, e.g. managed in Portainer) with the data on an NFS share and
+# VA-API hardware encoding: see docs/INSTALL.md. The image is built on the server
+# (docker build -t nitch:latest -f deploy/Dockerfile .); the multiview output stays in memory.
 #   docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
-# The Twitch credentials come from .env, or in Portainer from the stack's environment variables.
+# Everything machine-specific comes from .env (or Portainer's stack environment variables):
+#   NITCH_TWITCH_CLIENT_ID, NITCH_TWITCH_CLIENT_SECRET   the Twitch app
+#   NITCH_NFS_ADDR, NITCH_NFS_PATH                        the share for the data (path must exist)
+#   NITCH_RENDER_GID, NITCH_VIDEO_GID                     getent group render video
 
 services:
   nitch:
@@ -14,20 +17,20 @@ services:
       NITCH_TWITCH_CLIENT_ID: ${NITCH_TWITCH_CLIENT_ID:?set in .env or the stack variables}
       NITCH_TWITCH_CLIENT_SECRET: ${NITCH_TWITCH_CLIENT_SECRET:?set in .env or the stack variables}
       NITCH_BIND: ${NITCH_BIND:-0.0.0.0:8080}
-      # VA-API on the VM's virtio GPU (AMD native context, D32); falls back to x264 if missing.
+      # VA-API (D32); falls back to x264 if the VA encoder is missing.
       NITCH_ENCODER: ${NITCH_ENCODER:-va}
       NITCH_MAX_MULTIVIEW: ${NITCH_MAX_MULTIVIEW:-2}
-      # GStreamer's plugin registry: local, not on the NAS.
+      # GStreamer's plugin registry: local, not on the share.
       XDG_CACHE_HOME: /tmp
     devices:
       - /dev/dri:/dev/dri
     group_add:
-      # The VM's render and video groups (getent group render video), for /dev/dri.
-      - "104"
-      - "44"
+      # The host's render and video groups, for /dev/dri.
+      - ${NITCH_RENDER_GID:?set in .env (getent group render)}
+      - ${NITCH_VIDEO_GID:?set in .env (getent group video)}
     volumes:
       # nocopy: Docker would otherwise copy the image's /data ownership onto the share, which
-      # the NAS refuses (it maps every user to its own).
+      # a NAS that maps every user to its own refuses.
       - type: volume
         source: nitch-data
         target: /data
@@ -46,5 +49,5 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: addr=192.168.1.2,nfsvers=4.2,rw,noac
-      device: ":/export/nitch"
+      o: addr=${NITCH_NFS_ADDR:?set in .env},nfsvers=4.2,rw,noac
+      device: ":${NITCH_NFS_PATH:?set in .env}"
