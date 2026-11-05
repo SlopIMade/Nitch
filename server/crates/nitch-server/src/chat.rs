@@ -228,33 +228,48 @@ async fn run(mut cmds: mpsc::UnboundedReceiver<Cmd>, out: broadcast::Sender<Chat
     }
 }
 
+/// Our own PING to Twitch: a connection that died without closing (seen after ~20 h: no data,
+/// no error, joins went nowhere) is noticed because nothing comes back.
+const KEEPALIVE: Duration = Duration::from_secs(60);
+/// Silence after which the connection counts as dead (two missed PONGs and some).
+const DEAD_AFTER: Duration = Duration::from_secs(150);
+/// A send that hangs this long means the connection is stuck.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// One connection; returns `Ok` when nothing is wanted anymore, `Err` when the connection broke.
 async fn session(
     cmds: &mut mpsc::UnboundedReceiver<Cmd>,
     out: &broadcast::Sender<ChatMessage>,
     wanted: &mut HashSet<String>,
 ) -> anyhow::Result<()> {
-    let (ws, _) = tokio_tungstenite::connect_async(IRC_URL).await?;
+    let (ws, _) = tokio::time::timeout(SEND_TIMEOUT, tokio_tungstenite::connect_async(IRC_URL)).await??;
     let (mut tx, mut rx) = ws.split();
+    let send = async |tx: &mut futures::stream::SplitSink<_, Message>, line: String| -> anyhow::Result<()> {
+        tokio::time::timeout(SEND_TIMEOUT, tx.send(Message::text(line))).await??;
+        Ok(())
+    };
     // Anonymous, read-only: the justinfan nick needs no password.
     for line in ["CAP REQ :twitch.tv/tags twitch.tv/commands", "PASS SCHMOOPIIE", "NICK justinfan41827"] {
-        tx.send(Message::text(line)).await?;
+        send(&mut tx, line.to_string()).await?;
     }
     for c in wanted.iter() {
-        tx.send(Message::text(format!("JOIN #{c}"))).await?;
+        send(&mut tx, format!("JOIN #{c}")).await?;
     }
     tracing::info!(channels = wanted.len(), "chat connected");
+    let mut keepalive = tokio::time::interval(KEEPALIVE);
+    keepalive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_heard = tokio::time::Instant::now();
     loop {
         tokio::select! {
             cmd = cmds.recv() => match cmd {
                 Some(Cmd::Join(c)) => {
                     if wanted.insert(c.clone()) {
-                        tx.send(Message::text(format!("JOIN #{c}"))).await?;
+                        send(&mut tx, format!("JOIN #{c}")).await?;
                     }
                 }
                 Some(Cmd::Part(c)) => {
                     if wanted.remove(&c) {
-                        tx.send(Message::text(format!("PART #{c}"))).await?;
+                        send(&mut tx, format!("PART #{c}")).await?;
                     }
                     if wanted.is_empty() {
                         let _ = tx.close().await;
@@ -264,12 +279,19 @@ async fn session(
                 }
                 None => return Ok(()),
             },
+            _ = keepalive.tick() => {
+                if last_heard.elapsed() > DEAD_AFTER {
+                    anyhow::bail!("nothing from Twitch for {} s", last_heard.elapsed().as_secs());
+                }
+                send(&mut tx, "PING :nitch".to_string()).await?;
+            }
             frame = rx.next() => {
                 let Some(frame) = frame else { anyhow::bail!("closed by Twitch") };
+                last_heard = tokio::time::Instant::now();
                 let Message::Text(text) = frame? else { continue };
                 for line in text.lines() {
                     if let Some(rest) = line.strip_prefix("PING") {
-                        tx.send(Message::text(format!("PONG{rest}"))).await?;
+                        send(&mut tx, format!("PONG{rest}")).await?;
                     } else if let Some(msg) = parse_privmsg(line) {
                         let _ = out.send(msg);
                     } else if line.contains(" RECONNECT") {
