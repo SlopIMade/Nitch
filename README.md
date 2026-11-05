@@ -50,8 +50,10 @@ multiview with chat next to it.
 |---|---|
 | ![Home](docs/screenshots/home.jpg) | ![Single stream with chat over the picture](docs/screenshots/single-chat.jpg) |
 | Home: saved multiviews and live channels | A single stream with the chat over the picture |
-| ![Chat beside the picture](docs/screenshots/multiview-chat-beside.jpg) | ![Side menu](docs/screenshots/side-menu.jpg) |
-| Multiview with the chat beside the picture | The side menu: add streams while watching |
+| ![Chat beside the picture](docs/screenshots/multiview-chat-beside.jpg) | ![Layout editor](docs/screenshots/layout-edit.jpg) |
+| Multiview with the chat beside the picture | Editing a custom layout over the running picture |
+| ![Side menu: streams](docs/screenshots/side-menu.jpg) | ![Side menu: chat](docs/screenshots/side-menu-chat.jpg) |
+| The side menu: add streams while watching | The side menu: chat look and place |
 
 ## Quick start
 
