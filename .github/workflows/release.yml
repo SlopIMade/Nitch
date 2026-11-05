@@ -83,8 +83,22 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' && !contains(github.ref_name, '-') }}
             type=raw,value=test,enable=${{ github.ref_type != 'tag' }}
+      # Without a Docker Hub token the image is only built: the GitHub release still happens, and
+      # re-running this job once the token is set publishes the image for the same tag.
+      - name: Docker Hub token
+        id: hub
+        env:
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ "$PUBLISH" = true ] && [ -n "$TOKEN" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            [ "$PUBLISH" = true ] && echo "::warning::DOCKERHUB_TOKEN is not set: image built, not published"
+            true
+          fi
       - uses: docker/login-action@v3
-        if: env.PUBLISH == 'true'
+        if: steps.hub.outputs.push == 'true'
         with:
           username: ${{ env.DOCKERHUB_USER }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -93,7 +107,7 @@ jobs:
           context: .
           file: deploy/Dockerfile
           platforms: linux/amd64
-          push: ${{ env.PUBLISH == 'true' }}
+          push: ${{ steps.hub.outputs.push == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
