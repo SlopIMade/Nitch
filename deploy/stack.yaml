@@ -1,21 +1,26 @@
-# Nitch on a home server (Docker, e.g. managed in Portainer) with the data on an NFS share and
-# VA-API hardware encoding: see docs/INSTALL.md. The image is built on the server
-# (docker build -t nitch:latest -f deploy/Dockerfile .); the multiview output stays in memory.
-#   docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
-# Everything machine-specific comes from .env (or Portainer's stack environment variables):
+# Nitch on a home server VM (e.g. a Portainer stack) with the data on an NFS share and VA-API
+# through a virtio GPU in AMD native-context mode: see docs/INSTALL.md and D32.
+#   Portainer: Stacks → Add stack → Web editor, paste this file, set the variables below.
+#   CLI:       docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
+# Everything machine-specific comes from the stack's environment variables (or .env):
 #   NITCH_TWITCH_CLIENT_ID, NITCH_TWITCH_CLIENT_SECRET   the Twitch app
 #   NITCH_NFS_ADDR, NITCH_NFS_PATH                        the share for the data (path must exist)
 #   NITCH_RENDER_GID, NITCH_VIDEO_GID                     getent group render video
+#   NITCH_HOST_GALLIUM                                    the host's Mesa library built for the GPU,
+#                                                         ls /usr/lib/x86_64-linux-gnu/libgallium-*
+# The image's Mesa can't drive the virtio GPU, so the host's VA driver and Mesa library are mounted
+# in (D32). If they don't fit, the server falls back to software encoding (x264). On a host whose
+# GPU Debian's Mesa supports (AMD/Intel bare metal), remove the two mounts and the variable.
 
 services:
   nitch:
-    image: nitch:latest
+    image: slopimade/nitch:latest
     # Host networking: reachable on the LAN without port mapping, and the mDNS announcement
     # reaches the TV app.
     network_mode: host
     environment:
-      NITCH_TWITCH_CLIENT_ID: ${NITCH_TWITCH_CLIENT_ID:?set in .env or the stack variables}
-      NITCH_TWITCH_CLIENT_SECRET: ${NITCH_TWITCH_CLIENT_SECRET:?set in .env or the stack variables}
+      NITCH_TWITCH_CLIENT_ID: ${NITCH_TWITCH_CLIENT_ID:?set in the stack variables or .env}
+      NITCH_TWITCH_CLIENT_SECRET: ${NITCH_TWITCH_CLIENT_SECRET:?set in the stack variables or .env}
       NITCH_BIND: ${NITCH_BIND:-0.0.0.0:8080}
       # VA-API (D32); falls back to x264 if the VA encoder is missing.
       NITCH_ENCODER: ${NITCH_ENCODER:-va}
@@ -26,8 +31,8 @@ services:
       - /dev/dri:/dev/dri
     group_add:
       # The host's render and video groups, for /dev/dri.
-      - ${NITCH_RENDER_GID:?set in .env (getent group render)}
-      - ${NITCH_VIDEO_GID:?set in .env (getent group video)}
+      - ${NITCH_RENDER_GID:?set getent group render}
+      - ${NITCH_VIDEO_GID:?set getent group video}
     volumes:
       # nocopy: Docker would otherwise copy the image's /data ownership onto the share, which
       # a NAS that maps every user to its own refuses.
@@ -42,6 +47,20 @@ services:
         tmpfs:
           size: 536870912
           mode: 01777
+      # The host's Mesa for its GPU (see above); missing files stop the start instead of
+      # silently mounting empty directories.
+      - type: bind
+        source: /usr/lib/x86_64-linux-gnu/dri/virtio_gpu_drv_video.so
+        target: /usr/lib/x86_64-linux-gnu/dri/virtio_gpu_drv_video.so
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${NITCH_HOST_GALLIUM:?set ls /usr/lib/x86_64-linux-gnu/libgallium-*}
+        target: ${NITCH_HOST_GALLIUM}
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
 
 volumes:
@@ -49,5 +68,5 @@ volumes:
     driver: local
     driver_opts:
       type: nfs
-      o: addr=${NITCH_NFS_ADDR:?set in .env},nfsvers=4.2,rw,noac
-      device: ":${NITCH_NFS_PATH:?set in .env}"
+      o: addr=${NITCH_NFS_ADDR:?set in the stack variables or .env},nfsvers=4.2,rw,noac
+      device: ":${NITCH_NFS_PATH:?set in the stack variables or .env}"

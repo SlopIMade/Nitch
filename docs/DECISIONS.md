@@ -346,6 +346,11 @@ second and only needed for a minute. SQLite keeps WAL, but in exclusive locking 
 no shared-memory file (which doesn't work on NFS); a second server on the same data fails at once
 instead of corrupting it. The stack is `deploy/stack.yaml`, a template whose machine-specific
 values come from `.env`; the image is built on the server.
+*2026-11-05:* the stack uses the Docker Hub image (D34) and mounts the host's VA driver and Mesa
+library instead of building an image with them: the image's Mesa comes from the same
+trixie-backports version, so the host's library finds its dependencies. Tested: `vainfo` and the
+VA encoder work in the container, a 2×2 multiview runs at a load of 0.15. Created in Portainer,
+the stack is fully managed there.
 
 ### D33 — Chat beside the picture; a side menu that stays open; navigation by rows
 *2026-11-05*

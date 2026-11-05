@@ -80,28 +80,34 @@ The server holds the Twitch login, and any device on the network can use it.
 3. Open **Nitch** from the TV's app row. It lists the servers it finds on the network. Otherwise
    enter the address (e.g. `192.168.1.10:8080`).
 
-## Example: a home server with an NFS share and VA-API
+## Example: a VM with a virtio GPU, an NFS share and Portainer
 
-`deploy/stack.yaml` is a template for this (D32): host networking, VA-API through `/dev/dri`,
-the data on an NFS share, the multiview output in memory. Everything machine-specific comes
-from `.env` (or Portainer's stack variables): `NITCH_NFS_ADDR` and `NITCH_NFS_PATH` (the folder
-must exist), `NITCH_RENDER_GID` and `NITCH_VIDEO_GID` (`getent group render video`).
+`deploy/stack.yaml` is a template for this (D32): the Docker Hub image, host networking, VA-API
+through `/dev/dri`, the data on an NFS share, the multiview output in memory. The image's Mesa
+can't drive a virtio GPU in AMD native-context mode, so the stack mounts the host's VA driver and
+Mesa library (the host's own Mesa build for that GPU); if they don't fit, Nitch falls back to
+software encoding. On bare-metal AMD/Intel hosts, remove those two mounts.
 
-1. Copy the repository to the server (e.g. `~/nitch`). If its GPU needs a Mesa build of its own,
-   e.g. a VM's virtio GPU in AMD native-context mode, put those packages into `deploy/debs/`:
-   `mesa-va-drivers`, `mesa-libgallium`, `libegl-mesa0`, `libgbm1`, `libglx-mesa0` and
-   `libgl1-mesa-dri` (all of them: they require each other's exact version).
-2. Build the image and start the stack:
+1. In Portainer: **Stacks → Add stack → Web editor**, paste `deploy/stack.yaml`.
+2. Add the environment variables:
 
-   ```bash
-   sudo docker build -t nitch:latest -f deploy/Dockerfile .
-   sudo docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d
-   ```
+   | Variable | Value |
+   |---|---|
+   | `NITCH_TWITCH_CLIENT_ID`, `NITCH_TWITCH_CLIENT_SECRET` | your Twitch app |
+   | `NITCH_NFS_ADDR`, `NITCH_NFS_PATH` | the NFS server and the exported folder (it must exist) |
+   | `NITCH_RENDER_GID`, `NITCH_VIDEO_GID` | `getent group render video` on the host |
+   | `NITCH_HOST_GALLIUM` | `ls /usr/lib/x86_64-linux-gnu/libgallium-*` on the host |
 
-   In Portainer, the stack can be created from the same file instead (Twitch credentials as stack
-   environment variables); the image has to be built on the server first.
-3. Check: `sudo docker exec nitch-nitch-1 vainfo --display drm --device /dev/dri/renderD128` lists
-   `VAEntrypointEncSlice` for H.264, and the log says `encoder=Va`.
+3. Deploy. The log says `encoder=Va` when hardware encoding works.
+
+Without Portainer: the same file with the variables in `.env`,
+`docker compose -p nitch --env-file .env -f deploy/stack.yaml up -d`. A stack started like this
+shows as "Limited" in Portainer; created in Portainer, it is fully managed there.
+
+Alternatively, build an image with that Mesa inside: put the host's Mesa packages into
+`deploy/debs/` (`mesa-va-drivers`, `mesa-libgallium`, `libegl-mesa0`, `libgbm1`, `libglx-mesa0`,
+`libgl1-mesa-dri`: all of them, they require each other's exact version) and build
+`deploy/Dockerfile`; then the two mounts aren't needed.
 
 ## Updating
 
