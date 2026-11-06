@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { claimArrows, installBackHandler } from "../tv";
-import { parts, useChatMessages } from "./chat";
+import { noticeText, parts, useChatMessages } from "./chat";
 import { channelColor, updateChat, useChatSettings, type ChatSettings } from "./chatSettings";
 import { Icon } from "../components/Icon";
 
@@ -36,7 +36,9 @@ export function ChatOverlay({
 }) {
   const s = useChatSettings();
   const channels = shownChannels(s, focused, all);
-  const messages = useChatMessages(channels);
+  const allMessages = useChatMessages(channels);
+  // Without moderation lines, notices are left out and hidden messages stay as they were.
+  const messages = s.moderation ? allMessages : allMessages.filter((m) => !m.notice);
   const list = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const mixed = channels.length > 1;
@@ -138,28 +140,36 @@ export function ChatOverlay({
       <div className="chat__list" ref={list} style={{ opacity: s.text }}>
         {channels.length === 0 && <div className="chat__empty">Chat is off.</div>}
         {messages.map((m) => (
-          <div key={m.seq} className="chat__line" style={mixed ? { borderLeftColor: channelColor(m.channel) } : undefined}>
+          <div
+            key={m.seq}
+            className={`chat__line${m.notice ? " chat__line--notice" : ""}`}
+            style={mixed ? { borderLeftColor: channelColor(m.channel) } : undefined}
+          >
             {mixed && (
               <span className="chat__channel" style={{ color: channelColor(m.channel) }}>
                 {m.channel}
               </span>
             )}
-            <span className="chat__name" style={{ color: m.color || "#a970ff" }}>
-              {m.display_name}
-            </span>
-            <span className="chat__sep">: </span>
-            {parts(m).map((p, j) =>
-              "emote" in p ? (
-                <img
-                  key={j}
-                  className="chat__emote"
-                  alt={p.name}
-                  title={p.name}
-                  src={`https://static-cdn.jtvnw.net/emoticons/v2/${p.emote}/default/dark/1.0`}
-                />
-              ) : (
-                <span key={j}>{p.text}</span>
-              ),
+            {m.notice ? (
+              <span>{noticeText(m)}</span>
+            ) : (
+              <>
+                <span className="chat__name" style={{ color: m.color || "#a970ff" }}>
+                  {m.display_name}
+                </span>
+                <span className="chat__sep">: </span>
+                {m.deleted && s.moderation ? (
+                  <span className="chat__deleted">message deleted</span>
+                ) : (
+                  parts(m, s.thirdPartyEmotes).map((p, j) =>
+                    "src" in p ? (
+                      <img key={j} className="chat__emote" alt={p.name} title={p.name} src={p.src} srcSet={p.srcset} />
+                    ) : (
+                      <span key={j}>{p.text}</span>
+                    ),
+                  )
+                )}
+              </>
             )}
           </div>
         ))}

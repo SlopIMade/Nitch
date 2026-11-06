@@ -36,6 +36,13 @@ enum Cmd {
         )]
         player_types: Vec<String>,
     },
+    /// How far behind the clock each player type's live edge is (newest segment's timestamp),
+    /// sampled a few times side by side.
+    Edges {
+        channel: String,
+        #[arg(long, value_delimiter = ',', default_value = "site,embed,autoplay@android")]
+        player_types: Vec<String>,
+    },
     /// What does a session look like after sitting idle? One fetch, `wait` seconds of nothing,
     /// then a fetch every 2 s: segment count, ads, first/last timestamp vs. the clock.
     Idle {
@@ -77,6 +84,7 @@ async fn main() -> Result<()> {
         Cmd::Probe { channel, player_types } => probe(&tw, &channel, &player_types).await,
         Cmd::Preroll { channel, wait } => preroll(&tw, &channel, wait).await,
         Cmd::Idle { channel, wait } => idle(&tw, &channel, wait).await,
+        Cmd::Edges { channel, player_types } => edges(&tw, &channel, &player_types).await,
         Cmd::Watch { channel, player_type, rendition, minutes, record } => {
             let opts = watch::Options {
                 channel,
@@ -113,6 +121,33 @@ async fn probe(tw: &twitch::Twitch, channel: &str, player_types: &[String]) -> R
             Ok(line) => println!("{pt:<20} {line}"),
             Err(e) => println!("{pt:<20} error: {e:#}"),
         }
+    }
+    Ok(())
+}
+
+async fn edges(tw: &twitch::Twitch, channel: &str, player_types: &[String]) -> Result<()> {
+    let mut urls = Vec::new();
+    for pt in player_types {
+        let token = tw.playback_token(channel, pt).await?;
+        let master = tw.master_playlist(channel, &token).await?;
+        urls.push((pt.clone(), master.variants.iter().min_by_key(|v| v.bandwidth).unwrap().uri.clone()));
+    }
+    for _ in 0..8 {
+        let mut line = String::new();
+        for (pt, url) in &urls {
+            let (_, text) = tw.get_text(url).await?;
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as i64;
+            let last = text
+                .lines()
+                .filter_map(|l| l.strip_prefix("#EXT-X-PROGRAM-DATE-TIME:"))
+                .filter_map(|t| chrono::DateTime::parse_from_rfc3339(t.trim()).ok())
+                .map(|t| t.timestamp_millis())
+                .last();
+            let ads = hls::parse_media(&text)?.ad_segment_count();
+            line += &format!("{pt}: {} behind (ads {ads})   ", last.map_or("-".into(), |t| format!("{:.1}s", (now - t) as f64 / 1000.0)));
+        }
+        println!("{line}");
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
     Ok(())
 }

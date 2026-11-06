@@ -22,9 +22,26 @@ const IRC_URL: &str = "wss://irc-ws.chat.twitch.tv:443";
 /// Messages kept per joined channel.
 pub const HISTORY: usize = 150;
 
-/// One chat line, as sent to clients.
+/// A moderation event, sent like a chat line (D37).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Notice {
+    /// `user` was timed out; their messages are hidden.
+    Timeout { seconds: u64 },
+    /// `user` was banned; their messages are hidden.
+    Ban,
+    /// A moderator cleared the whole chat.
+    Clear,
+    /// One message (by its id) was deleted.
+    Delete { target: String },
+}
+
+/// One chat line, as sent to clients. Moderation events are lines too (`notice` set, `user` the
+/// person it's about), so they reach the history and every client in order.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct ChatMessage {
+    /// Twitch's message id (a deleted message is named by it); empty for notices.
+    pub id: String,
     pub channel: String,
     pub user: String,
     pub display_name: String,
@@ -37,6 +54,8 @@ pub struct ChatMessage {
     pub badges: Vec<String>,
     /// Unix ms (Twitch's `tmi-sent-ts`).
     pub ts: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Notice>,
 }
 
 /// Parses the tags of an IRC line (`@a=1;b=2 :prefix CMD ...`) into a map, unescaping values.
@@ -48,6 +67,52 @@ fn parse_tags(raw: &str) -> HashMap<&str, String> {
             Some((k, v))
         })
         .collect()
+}
+
+/// Parses a moderation line: `CLEARCHAT` (timeout, ban, or the whole chat) or `CLEARMSG` (one
+/// message). Anonymous connections get these too (with `twitch.tv/commands`).
+pub fn parse_notice(line: &str) -> Option<ChatMessage> {
+    let (tags, rest) = match line.strip_prefix('@') {
+        Some(l) => {
+            let (t, r) = l.split_once(' ')?;
+            (parse_tags(t), r)
+        }
+        None => (HashMap::new(), line),
+    };
+    // :tmi.twitch.tv CLEARCHAT #channel[ :user]
+    let rest = rest.strip_prefix(':')?.split_once(' ')?.1;
+    let (command, rest) = rest.split_once(' ')?;
+    let rest = rest.strip_prefix('#')?;
+    let (channel, trailing) = match rest.split_once(" :") {
+        Some((c, t)) => (c, Some(t.trim_end_matches(['\r', '\n']))),
+        None => (rest.trim_end_matches(['\r', '\n']), None),
+    };
+    let (user, notice) = match command {
+        "CLEARCHAT" => match trailing {
+            Some(user) => {
+                let notice = match tags.get("ban-duration").and_then(|d| d.parse().ok()) {
+                    Some(seconds) => Notice::Timeout { seconds },
+                    None => Notice::Ban,
+                };
+                (user.to_string(), notice)
+            }
+            None => (String::new(), Notice::Clear),
+        },
+        "CLEARMSG" => (tags.get("login").cloned().unwrap_or_default(), Notice::Delete { target: tags.get("target-msg-id")?.clone() }),
+        _ => return None,
+    };
+    Some(ChatMessage {
+        id: String::new(),
+        channel: channel.to_string(),
+        display_name: user.clone(),
+        user,
+        color: String::new(),
+        text: String::new(),
+        emotes: Vec::new(),
+        badges: Vec::new(),
+        ts: tags.get("tmi-sent-ts").and_then(|t| t.parse().ok()).unwrap_or(0),
+        notice: Some(notice),
+    })
 }
 
 /// Parses a `PRIVMSG` line; other lines give `None`.
@@ -81,6 +146,7 @@ pub fn parse_privmsg(line: &str) -> Option<ChatMessage> {
         })
         .unwrap_or_default();
     Some(ChatMessage {
+        id: tags.get("id").cloned().unwrap_or_default(),
         channel: channel.to_string(),
         display_name: tags.get("display-name").filter(|d| !d.is_empty()).cloned().unwrap_or_else(|| user.clone()),
         user,
@@ -89,6 +155,7 @@ pub fn parse_privmsg(line: &str) -> Option<ChatMessage> {
         emotes,
         badges: tags.get("badges").map(|b| b.split(',').filter(|s| !s.is_empty()).map(str::to_string).collect()).unwrap_or_default(),
         ts: tags.get("tmi-sent-ts").and_then(|t| t.parse().ok()).unwrap_or(0),
+        notice: None,
     })
 }
 
@@ -292,7 +359,7 @@ async fn session(
                 for line in text.lines() {
                     if let Some(rest) = line.strip_prefix("PING") {
                         send(&mut tx, format!("PONG{rest}")).await?;
-                    } else if let Some(msg) = parse_privmsg(line) {
+                    } else if let Some(msg) = parse_privmsg(line).or_else(|| parse_notice(line)) {
                         let _ = out.send(msg);
                     } else if line.contains(" RECONNECT") {
                         anyhow::bail!("Twitch asked to reconnect");
@@ -330,6 +397,21 @@ mod tests {
         assert!(parse_privmsg(":tmi.twitch.tv 001 justinfan41827 :Welcome, GLHF!").is_none());
         assert!(parse_privmsg("PING :tmi.twitch.tv").is_none());
         assert!(parse_privmsg("@emote-only=0 :tmi.twitch.tv ROOMSTATE #tarik").is_none());
+    }
+
+    #[test]
+    fn parses_timeouts_bans_clears_and_deletions() {
+        let t = parse_notice("@ban-duration=600;room-id=1;target-user-id=2;tmi-sent-ts=1793660000000 :tmi.twitch.tv CLEARCHAT #tarik :spammer").unwrap();
+        assert_eq!((t.channel.as_str(), t.user.as_str(), t.ts), ("tarik", "spammer", 1793660000000));
+        assert_eq!(t.notice, Some(Notice::Timeout { seconds: 600 }));
+        let b = parse_notice("@room-id=1;target-user-id=2;tmi-sent-ts=1 :tmi.twitch.tv CLEARCHAT #tarik :troll\r").unwrap();
+        assert_eq!((b.user.as_str(), b.notice), ("troll", Some(Notice::Ban)));
+        let c = parse_notice("@room-id=1;tmi-sent-ts=1 :tmi.twitch.tv CLEARCHAT #tarik").unwrap();
+        assert_eq!((c.channel.as_str(), c.notice), ("tarik", Some(Notice::Clear)));
+        let d = parse_notice("@login=someone;room-id=;target-msg-id=abc-123;tmi-sent-ts=1 :tmi.twitch.tv CLEARMSG #tarik :bad words").unwrap();
+        assert_eq!((d.user.as_str(), d.notice), ("someone", Some(Notice::Delete { target: "abc-123".into() })));
+        assert!(parse_notice(":a!a@a.tmi.twitch.tv PRIVMSG #b :hi").is_none());
+        assert_eq!(parse_privmsg("@id=xyz :a!a@a.tmi.twitch.tv PRIVMSG #b :hi").unwrap().id, "xyz");
     }
 
     #[test]

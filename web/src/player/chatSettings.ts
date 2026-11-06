@@ -23,6 +23,10 @@ export type ChatSettings = {
   text: number;
   /** Channels left out of the combined chat. */
   exclude: string[];
+  /** 7TV emotes (D37). */
+  thirdPartyEmotes: boolean;
+  /** Timeouts and bans as lines, and hidden messages as "message deleted" (D37). */
+  moderation: boolean;
 };
 
 const KEY = "nitch.chat.v2";
@@ -38,6 +42,8 @@ export const CHAT_DEFAULTS: ChatSettings = {
   opacity: 0.45,
   text: 1,
   exclude: [],
+  thirdPartyEmotes: true,
+  moderation: true,
 };
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const round = (v: number) => Math.round(v * 100) / 100;

@@ -181,6 +181,23 @@ impl Timeline {
     fn advance(&mut self, live: &BTreeMap<i64, Candidate>, start: i64, edge: i64) {
         let mut end = self.entries.back().map_or(start, |e| e.start + ms(e.duration));
         loop {
+            // Back to the primary as soon as it has live content here again. A backup (the 360p
+            // substitute especially) can run on a time grid half a second off; following it,
+            // every primary segment started "too early" and was skipped until the backups were
+            // no longer fetched, ~30 s after the ad. The discontinuity covers the small jump.
+            if self.last_origin().is_some_and(|o| matches!(o, Origin::Backup(_))) {
+                let back = live
+                    .range(end - ms(self.nominal) / 2..end + ms(self.nominal))
+                    .find(|(_, c)| c.origin == Origin::Primary)
+                    .map(|(&pdt, c)| (pdt, c.duration));
+                if let Some((pdt, duration)) = back {
+                    // Same rule as taking a segment normally: within half a segment is drift.
+                    let off_grid = (pdt - end).abs() >= ms(self.nominal) / 2;
+                    self.push(pdt, duration, Origin::Primary, off_grid, false);
+                    end = pdt + ms(duration);
+                    continue;
+                }
+            }
             let next = live.range(end - TOLERANCE_MS..).next();
             match next {
                 // The next live segment starts here (within half a segment, which absorbs

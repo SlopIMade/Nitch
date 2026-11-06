@@ -106,6 +106,32 @@ fn a_lower_quality_substitute_is_set_apart_by_discontinuities() {
 }
 
 #[test]
+fn the_primary_takes_over_at_once_after_the_ad() {
+    // A preroll covered by a 360p substitute on a grid 0.5 s off; then the primary's live stream
+    // resumes. It must take over right away, not when the backups are no longer fetched.
+    let start = parse_pdt("2026-11-06T21:20:32.000Z").unwrap();
+    let mut tl = Timeline::new();
+    let mut first_primary = None;
+    for step in 0..30i64 {
+        let edge_n = 3 + step; // segments so far
+        // Primary: ads for the first 16 segments, live after.
+        let mut primary = grid_playlist(start, edge_n.min(30), false, false, "primary.example");
+        for (i, s) in primary.segments.iter_mut().enumerate() {
+            s.ad = i < 16;
+        }
+        let mut low = grid_playlist(start + 500, edge_n.min(30), false, false, "low.example");
+        low.substitute = true;
+        tl.update(0, &primary, &[Some(&low)]);
+        if first_primary.is_none() && tl.last_origin() == Some(Origin::Primary) {
+            first_primary = Some(step);
+        }
+    }
+    // The primary's first live segment (index 16) is there from step 14 on.
+    assert!(first_primary.is_some_and(|s| s <= 15), "took over at step {first_primary:?}");
+    assert_eq!(tl.last_origin(), Some(Origin::Primary));
+}
+
+#[test]
 fn slates_of_an_fmp4_stream_are_fmp4_from_the_first() {
     // A preroll on an fMP4 stream: no live segment yet, but the ads show the container.
     let start = parse_pdt("2026-11-06T21:01:28.531Z").unwrap();

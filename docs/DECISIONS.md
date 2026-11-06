@@ -429,3 +429,19 @@ They only offer up to 360p, in the same container (TS/fMP4) as the channel's mai
 
 Warm sessions (D35) stay: they give followed channels full quality from the start.
 
+
+### D37 — 7TV emotes and moderation lines in the chat
+*2026-11-06*
+
+- **7TV emotes** come from the server (`/api/emotes/{login}`): it resolves the Twitch user id,
+  merges 7TV's global set with the channel's, and caches the map for 30 minutes (a channel
+  without a 7TV account is a 404 and simply has none). 7TV thereby learns which channels are
+  watched from the server's address, never from the TV. The client replaces whole words that
+  match a name; images load from 7TV's CDN, like Twitch's emotes from Twitch's. Off with
+  "7TV emotes" in the chat menu.
+- **Timeouts, bans, cleared chats and deleted messages** arrive on the anonymous IRC connection
+  too (`CLEARCHAT`, `CLEARMSG` with `twitch.tv/commands`). They are chat lines with a `notice`
+  and stay in the history in order. A timeout or ban shows a line ("x was timed out (10 min)")
+  and turns that person's earlier messages into "message deleted"; a deletion does that to one
+  message; a clear to everything before it. Off with "Timeouts & bans" (then the messages stay
+  as they were).

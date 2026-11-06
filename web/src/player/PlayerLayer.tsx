@@ -59,9 +59,11 @@ function AdBadge({ ad, hls }: { ad: PlayStatus["ad"]; hls: Hls | null }) {
   }, [ad]);
   if (!ad) return null;
   // The server reports stream time; the player's position in stream time is its program date
-  // time. It runs behind the live edge, so only show the badge while it plays the ad's stretch.
+  // time. It runs behind the live edge, so the badge waits until it plays the ad's stretch. It
+  // stays until the server ends the break, not at `until`: a preroll can be two blocks, and the
+  // second one isn't always announced.
   const playing = hls?.playingDate?.getTime();
-  if (playing && (playing < ad.from || (ad.until && playing >= ad.until))) return null;
+  if (playing && playing < ad.from) return null;
   if (ad.filled_by === "backup") return <div className="ad-badge">Ad skipped</div>;
   if (ad.filled_by === "low_quality") return <div className="ad-badge">Ad skipped · lower quality</div>;
   const left = ad.until && playing ? Math.max(0, Math.round((ad.until - playing) / 1000)) : null;

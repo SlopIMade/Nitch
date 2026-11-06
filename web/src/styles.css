@@ -1390,6 +1390,18 @@ h2 {
   font-weight: 700;
 }
 
+/* Moderation lines and hidden messages (D37). */
+.chat__line--notice {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+.chat__deleted {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .chat__emote {
   height: 1.6em;
   vertical-align: middle;

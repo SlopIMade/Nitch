@@ -5,6 +5,7 @@ mod auth;
 mod chat;
 mod config;
 mod discovery;
+mod emotes;
 mod multiview;
 mod play;
 mod sessions;
@@ -62,6 +63,8 @@ async fn server() -> Result<()> {
         player,
         multiview: multiview.clone(),
         tw,
+        emotes: emotes::Emotes::new(),
+        user_ids: Default::default(),
         started: std::time::Instant::now(),
         events: tokio::sync::broadcast::channel(64).0,
     });

@@ -34,6 +34,7 @@ multiview with chat next to it.
   where it uses space a 16:9 stream leaves empty
 - Text size, text opacity and background, saved per device
 - Followed channels open with the messages written before
+- Twitch and 7TV emotes; timeouts, bans and deleted messages (7TV and moderation can be turned off)
 
 **Android TV**
 - A small app that finds the server on the network and shows the same web app, so it updates

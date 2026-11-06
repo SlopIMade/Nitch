@@ -280,6 +280,20 @@ function ChatTab({ all, onAdjust }: { all: string[]; onAdjust: (a: ChatAdjust) =
         </section>
       )}
       <section className="sidemenu__section">
+        <h3>Show</h3>
+        <div className="chips">
+          <button
+            className={`chip${s.thirdPartyEmotes ? "" : " chip--off"}`}
+            onClick={() => updateChat((o) => ({ thirdPartyEmotes: !o.thirdPartyEmotes }))}
+          >
+            7TV emotes
+          </button>
+          <button className={`chip${s.moderation ? "" : " chip--off"}`} onClick={() => updateChat((o) => ({ moderation: !o.moderation }))}>
+            Timeouts & bans
+          </button>
+        </div>
+      </section>
+      <section className="sidemenu__section">
         <h3>Look</h3>
         <div className="stepper">
           <span>Text</span>

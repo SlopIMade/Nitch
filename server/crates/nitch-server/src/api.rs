@@ -25,6 +25,9 @@ pub struct AppState {
     pub multiview: Arc<multiview::Manager>,
     pub store: Arc<Store>,
     pub tw: nitch_twitch::Twitch,
+    pub emotes: crate::emotes::Emotes,
+    /// Channel login → Twitch user id (for the 7TV lookup), learned once.
+    pub user_ids: std::sync::Mutex<std::collections::HashMap<String, String>>,
     pub started: std::time::Instant,
     /// Events for every WebSocket client (e.g. `session_updated`), as JSON.
     pub events: tokio::sync::broadcast::Sender<String>,
@@ -48,6 +51,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/follows/live", get(follows_live))
         .route("/api/search", get(search))
         .route("/api/channels/{login}", get(channel))
+        .route("/api/emotes/{login}", get(emotes))
         .route("/api/play", post(play))
         .route("/api/play/{id}", get(play_status).delete(stop_play))
         .route("/api/sessions", get(list_sessions).post(create_session))
@@ -240,6 +244,25 @@ async fn channel(State(s): St, Path(login): Path<String>) -> ApiResult<ChannelIn
         avatar_url: user.profile_image_url,
         live: streams.into_iter().next().map(LiveStream::from),
     }))
+}
+
+/// 7TV emotes for a channel's chat (global and the channel's set): `{"emotes": {name: id}}`.
+async fn emotes(State(s): St, Path(login): Path<String>) -> ApiResult<serde_json::Value> {
+    let login = login.to_lowercase();
+    let known = s.user_ids.lock().unwrap().get(&login).cloned();
+    let id = match known {
+        Some(id) => id,
+        None => {
+            let tw = &s.tw;
+            let l = login.as_str();
+            let users = s.auth.call(false, |t| async move { tw.users_by_login(&t.token, &[l]).await }).await?.unwrap_or_default();
+            let id = users.into_iter().next().ok_or_else(|| ApiError::NotFound(format!("no channel '{login}'")))?.id;
+            s.user_ids.lock().unwrap().insert(login.clone(), id.clone());
+            id
+        }
+    };
+    let map = s.emotes.for_channel(&id).await;
+    Ok(Json(json!({ "emotes": &*map })))
 }
 
 #[derive(Deserialize)]
