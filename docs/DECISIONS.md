@@ -380,3 +380,30 @@ install over the previous one. Pushes to `main` only run the CI checks; nothing 
 without a tag. Users pull the image (`deploy/compose.yaml`); building from source stays possible
 (`deploy/compose.build.yaml`).
 
+### D35 — Prerolls: warm sessions for followed channels; slates keep pace with the clock
+*2026-11-06*
+
+Measured (spike S1, `probe`, `preroll`, `idle`): every new Twitch session starts with a preroll,
+for every player type alike (bonjwa, KaiCenat; some channels have none), so the backup chain can't
+fill it: all sources start their preroll at the same moment and the slate ran for about a minute.
+The preroll starts with the session's first playlist fetch and then runs out in real time, whether
+anyone keeps fetching or not; afterwards the whole session (every rendition) is ad-free. A
+playback token lasts 20 minutes.
+
+- **Warm sessions:** the server keeps one session per followed live channel (up to 20, refreshed
+  with the follow list every minute) open ahead of time: one fetch starts its preroll, a check
+  after 70 s marks it ready once no ad segment is left in it, a replacement is opened after 10
+  minutes and a session is handed out until it's 15 minutes old. Starting such a channel (single
+  view, multiview tile, or re-resolving an expired session) takes a ready one: no preroll. Cost:
+  about four requests per channel every ten minutes. Channels you don't follow still get the
+  preroll, filled by the slate.
+- **Slates by the clock:** a preroll's ad segments kept the same timestamps for half a minute, and
+  slates only advanced with them, so the output stood still (the countdown froze) and then jumped
+  ahead 30 s. While the primary is in an ad, slates now advance with the wall clock (up to 6 s
+  behind it, after the 4 s grace).
+- **Countdown:** the end of a break is the ad block's length from its first ad
+  (`X-TV-TWITCH-AD-POD-FILLED-DURATION`), kept for the whole break, instead of the latest single
+  ad's end, which made it jump back with every newly announced ad. A preroll can still be two
+  blocks that Twitch announces one after the other; then the countdown starts once more.
+- The badge is a status line (a dot and text), not something that looks like a button.
+

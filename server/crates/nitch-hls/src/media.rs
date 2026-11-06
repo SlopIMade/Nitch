@@ -54,6 +54,17 @@ impl DateRange {
     pub fn end(&self) -> Option<i64> {
         Some(self.start? + (self.duration? * 1000.0).round() as i64)
     }
+
+    /// End of the whole ad block (pod), from its first ad: Twitch announces the ads of a block one
+    /// by one, but the first carries the block's length (`X-TV-TWITCH-AD-POD-FILLED-DURATION`).
+    /// Without it, the end jumps later with every newly announced ad.
+    pub fn pod_end(&self) -> Option<i64> {
+        if attr(&self.attrs, "X-TV-TWITCH-AD-POD-POSITION")? != "0" {
+            return None;
+        }
+        let filled: f64 = attr(&self.attrs, "X-TV-TWITCH-AD-POD-FILLED-DURATION")?.parse().ok()?;
+        Some(self.start? + (filled * 1000.0).round() as i64)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -66,7 +77,14 @@ pub struct MediaPlaylist {
 impl MediaPlaylist {
     /// Time ranges `[start, end)` announced as ads.
     pub fn ad_ranges(&self) -> Vec<(i64, i64)> {
-        self.dateranges.iter().filter(|d| d.is_ad()).filter_map(|d| Some((d.start?, d.end()?))).collect()
+        self.dateranges
+            .iter()
+            .filter(|d| d.is_ad())
+            .filter_map(|d| {
+                let end = d.end()?;
+                Some((d.start?, d.pod_end().map_or(end, |pod| pod.max(end))))
+            })
+            .collect()
     }
 
     /// True if the playlist contains or announces an ad.

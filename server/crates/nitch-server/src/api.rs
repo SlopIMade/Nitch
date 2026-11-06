@@ -160,6 +160,7 @@ async fn system(State(s): St) -> Json<serde_json::Value> {
         "clock_rate": nitch_media::clock::measured_rate(),
         "multiview": s.multiview.diagnostics(),
         "play_sessions": s.player.diagnostics(),
+        "warm_sessions": s.player.warm_status(),
         "chat_channels": s.chat.channels(),
     }))
 }

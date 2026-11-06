@@ -698,22 +698,42 @@ h2 {
   font-size: 0.8rem;
 }
 
+/* A status line, not a control: plain text with a small dot, no box. */
 .ad-badge {
   position: absolute;
   top: 4.5rem;
   right: 1.25rem;
   z-index: 60;
-  padding: 0.4rem 0.75rem;
-  border-radius: var(--r-control);
-  background: var(--glass);
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  color: rgba(255, 255, 255, 0.75);
   font-size: 0.85rem;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
   pointer-events: none;
 }
 
+.ad-badge::before {
+  content: "";
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .ad-badge--slate {
-  color: var(--text);
-  background: rgba(145, 71, 255, 0.85);
+  color: #fff;
+}
+
+.ad-badge--slate::before {
+  background: var(--accent-2);
+  animation: ad-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ad-pulse {
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* ---------- multiview tiles (player) ---------- */

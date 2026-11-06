@@ -29,6 +29,11 @@ const KEEP: usize = 90;
 const TOLERANCE_MS: i64 = 150;
 /// A stretch without live content waits this long for the backups before it becomes a slate.
 const GRACE_MS: i64 = 4000;
+/// How far behind the wall clock Twitch's live edge usually is. During an ad, with a wall clock,
+/// slates advance with real time up to here (minus the grace), instead of with the ad segments'
+/// timestamps. Too little only means slates run a bit ahead and the first live seconds after the
+/// break are skipped.
+const LIVE_LAG_MS: i64 = 6000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Origin {
@@ -106,6 +111,13 @@ impl Timeline {
     /// Takes a fresh primary playlist of `rendition` (and, during ads, the backups' in priority
     /// order; `None` where a backup isn't available) and extends the timeline as far as possible.
     pub fn update(&mut self, rendition: usize, primary: &MediaPlaylist, backups: &[Option<&MediaPlaylist>]) {
+        self.update_at(rendition, primary, backups, None);
+    }
+
+    /// [`Timeline::update`], with the wall clock (Unix ms) for slates: they keep pace with real
+    /// time even when the ad segments' timestamps don't (a preroll's stood still for half a
+    /// minute, so the output stalled and later jumped ahead).
+    pub fn update_at(&mut self, rendition: usize, primary: &MediaPlaylist, backups: &[Option<&MediaPlaylist>], now: Option<i64>) {
         let sources = self.sources.entry(rendition).or_default();
         let mut live: BTreeMap<i64, Candidate> = BTreeMap::new();
 
@@ -136,6 +148,13 @@ impl Timeline {
 
         let (Some(start), Some(edge)) = (primary.segments.first().and_then(|s| s.pdt), primary.edge()) else {
             return;
+        };
+        // Only while the primary is in an ad: otherwise its own edge is the truth, however far
+        // behind the wall clock it is.
+        let in_ad = primary.segments.last().is_some_and(|s| s.ad);
+        let edge = match now {
+            Some(now) if in_ad => edge.max(now - LIVE_LAG_MS),
+            _ => edge,
         };
         self.advance(&live, start, edge);
         self.prune();

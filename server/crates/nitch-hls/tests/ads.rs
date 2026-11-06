@@ -49,8 +49,33 @@ fn detects_ad_segments_by_title_and_daterange() {
     assert_eq!(titled, 3);
     assert_eq!(pl.segments.iter().filter(|s| s.ad).count(), titled);
     assert!(pl.has_ads());
+    // Two 30 s ads; only the first is announced yet, but it carries the block's length (60 s).
     let start = parse_pdt("2026-11-02T20:00:31.787Z").unwrap();
-    assert_eq!(pl.ad_break_until(), Some(start + 30_235));
+    assert_eq!(pl.ad_break_until(), Some(start + 60_000));
+}
+
+#[test]
+fn slates_keep_pace_with_the_wall_clock_during_an_ad() {
+    // A preroll whose ad segments' timestamps stand still (seen live: half a minute): three ad
+    // segments, the same playlist on every refresh, while real time goes on.
+    let start = parse_pdt("2026-11-06T19:09:10.000Z").unwrap();
+    let mut pl = parse(&live_playlist(start, 3, 2.0, 0));
+    for s in &mut pl.segments {
+        s.ad = true;
+    }
+    let slates = |tl: &Timeline| tl.render(0, &SLATES).lines().filter(|l| l.ends_with(",slate")).count();
+
+    let mut by_clock = Timeline::new();
+    let mut by_ads = Timeline::new();
+    for step in 0..15 {
+        let now = start + 10_000 + step * 2000;
+        by_clock.update_at(0, &pl, &[], Some(now));
+        by_ads.update(0, &pl, &[]);
+    }
+    // 38 s after the start, minus the live lag (6 s) and the grace (4 s): 14 slates of 2 s.
+    assert_eq!(slates(&by_clock), 14);
+    // Following the frozen ad timestamps alone, the output would have stood still.
+    assert_eq!(slates(&by_ads), 1);
 }
 
 #[test]

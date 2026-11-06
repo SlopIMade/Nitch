@@ -31,6 +31,28 @@ const OFFLINE_BACKOFF: Duration = Duration::from_secs(15);
 /// After a backup failed to resolve, wait this long before trying it again.
 const BACKUP_RETRY: Duration = Duration::from_secs(30);
 
+// Pre-warming (D35): every new Twitch session starts with a preroll (all player types alike), and
+// it runs from the first playlist fetch, whether anyone keeps fetching or not. So the server opens
+// sessions for the followed live channels ahead of time; one whose preroll is over plays at once.
+/// Channels kept warm (the followed live ones, most viewers first).
+pub const MAX_WARM: usize = 20;
+/// A warm session is checked for ads this long after its first fetch (prerolls ran ~60 s).
+const WARM_CHECK_AFTER: Duration = Duration::from_secs(70);
+/// A replacement is opened when the newest warm session is this old ...
+const WARM_RENEW_AFTER: Duration = Duration::from_secs(10 * 60);
+/// ... and a warm session is no longer handed out after this (the playback token lasts 20 min).
+const WARM_MAX_AGE: Duration = Duration::from_secs(15 * 60);
+/// New warm sessions per round, so a long follow list doesn't hit Twitch all at once.
+const WARM_OPENS_PER_TICK: usize = 3;
+
+/// A session opened ahead of time for one channel.
+struct Warm {
+    master: Master,
+    opened: Instant,
+    /// Checked after its preroll: no ad segments.
+    ready: bool,
+}
+
 pub const SLATES: Slates = Slates { ts: "/hls/slate.ts", fmp4_init: "/hls/slate-init.mp4", fmp4: "/hls/slate.m4s" };
 
 /// Options for a play session. Everything but the defaults is for testing ad handling.
@@ -111,6 +133,9 @@ pub struct Player {
     tw: Twitch,
     sessions: Mutex<HashMap<String, PlaySession>>,
     counter: AtomicU64,
+    /// Warm sessions per channel (lowercase), and the channels to keep warm.
+    warm: Mutex<HashMap<String, Vec<Warm>>>,
+    warm_channels: Mutex<Vec<String>>,
 }
 
 /// The backup's rendition matching the primary's: same name, else same resolution.
@@ -159,7 +184,114 @@ pub fn choose_rendition(videos: &[VideoRendition], target: u32) -> Option<usize>
 
 impl Player {
     pub fn new(tw: Twitch) -> Self {
-        Self { tw, sessions: Mutex::new(HashMap::new()), counter: AtomicU64::new(0) }
+        Self {
+            tw,
+            sessions: Mutex::new(HashMap::new()),
+            counter: AtomicU64::new(0),
+            warm: Mutex::new(HashMap::new()),
+            warm_channels: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The channels to keep warm, in priority order (at most [`MAX_WARM`] are used).
+    pub fn set_warm_channels(&self, channels: Vec<String>) {
+        let channels: Vec<String> = channels.into_iter().map(|c| c.to_lowercase()).take(MAX_WARM).collect();
+        self.warm.lock().unwrap().retain(|c, _| channels.contains(c));
+        *self.warm_channels.lock().unwrap() = channels;
+    }
+
+    /// One round of pre-warming (every few seconds): drops old warm sessions, checks the ones
+    /// whose preroll should be over, and opens new ones where none is young enough.
+    pub async fn warm_tick(&self) {
+        let lowest = |m: &Master| m.variants.iter().min_by_key(|v| v.bandwidth).map(|v| v.uri.clone());
+        let to_check: Vec<(String, Instant, Url)> = {
+            let mut warm = self.warm.lock().unwrap();
+            for list in warm.values_mut() {
+                list.retain(|w| w.opened.elapsed() < WARM_MAX_AGE);
+            }
+            warm.iter()
+                .flat_map(|(c, list)| {
+                    list.iter()
+                        .filter(|w| !w.ready && w.opened.elapsed() >= WARM_CHECK_AFTER)
+                        .filter_map(|w| Some((c.clone(), w.opened, lowest(&w.master)?)))
+                })
+                .collect()
+        };
+        for (channel, opened, url) in to_check {
+            let result = match self.tw.get_text(&url).await {
+                Ok((status, text)) if status.is_success() => parse_media(&text, &url).ok().map(|pl| !pl.segments.iter().any(|s| s.ad)),
+                _ => None,
+            };
+            let mut warm = self.warm.lock().unwrap();
+            let Some(list) = warm.get_mut(&channel) else { continue };
+            match result {
+                Some(true) => {
+                    if let Some(w) = list.iter_mut().find(|w| w.opened == opened) {
+                        w.ready = true;
+                        tracing::debug!(%channel, "warm session ready (preroll over)");
+                    }
+                }
+                // Still in its preroll: check again next round.
+                Some(false) => {}
+                // Rejected (expired, offline): drop it.
+                None => list.retain(|w| w.opened != opened),
+            }
+        }
+
+        let channels = self.warm_channels.lock().unwrap().clone();
+        let due: Vec<String> = {
+            let warm = self.warm.lock().unwrap();
+            channels
+                .into_iter()
+                .filter(|c| warm.get(c).is_none_or(|list| list.iter().all(|w| w.opened.elapsed() >= WARM_RENEW_AFTER)))
+                .take(WARM_OPENS_PER_TICK)
+                .collect()
+        };
+        for channel in due {
+            let opened = async {
+                let master = self.tw.master_playlist(&channel, PRIMARY_PLAYER_TYPE).await?;
+                // The first fetch starts the preroll's clock.
+                let url = lowest(&master).context("no renditions")?;
+                self.tw.get_text(&url).await?;
+                anyhow::Ok(master)
+            };
+            match opened.await {
+                Ok(master) => {
+                    let mut warm = self.warm.lock().unwrap();
+                    warm.entry(channel).or_default().push(Warm { master, opened: Instant::now(), ready: false });
+                }
+                Err(e) => tracing::debug!(%channel, "warm session not opened: {e:#}"),
+            }
+        }
+    }
+
+    /// A warm session of `channel` whose preroll is over, if there is one (it's used up).
+    fn take_warm(&self, channel: &str) -> Option<Master> {
+        let mut warm = self.warm.lock().unwrap();
+        let list = warm.get_mut(&channel.to_lowercase())?;
+        // The youngest ready one lasts longest.
+        let i = list
+            .iter()
+            .enumerate()
+            .filter(|(_, w)| w.ready && w.opened.elapsed() < WARM_MAX_AGE)
+            .min_by_key(|(_, w)| w.opened.elapsed())?
+            .0;
+        Some(list.remove(i).master)
+    }
+
+    /// For diagnostics: warm sessions per channel (`ready` / all).
+    pub fn warm_status(&self) -> serde_json::Value {
+        let warm = self.warm.lock().unwrap();
+        let channels = self.warm_channels.lock().unwrap();
+        channels
+            .iter()
+            .map(|c| {
+                let list = warm.get(c);
+                let ready = list.map_or(0, |l| l.iter().filter(|w| w.ready).count());
+                (c.clone(), serde_json::json!(format!("{ready}/{}", list.map_or(0, Vec::len))))
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into()
     }
 
     pub fn new_id(&self) -> String {
@@ -170,9 +302,14 @@ impl Player {
 
     /// Resolves the channel and returns the new play session's id.
     pub async fn start(&self, channel: &str, options: PlayOptions) -> Result<String> {
-        let primary = self.tw.master_playlist(channel, &options.player_type).await?;
+        let warm = if options.player_type == PRIMARY_PLAYER_TYPE { self.take_warm(channel) } else { None };
+        let prewarmed = warm.is_some();
+        let primary = match warm {
+            Some(master) => master,
+            None => self.tw.master_playlist(channel, &options.player_type).await?,
+        };
         let id = self.new_id();
-        tracing::info!(%channel, %id, ?options, renditions = primary.variants.len(), "play session started");
+        tracing::info!(%channel, %id, ?options, renditions = primary.variants.len(), prewarmed, "play session started");
         let channel = channel.to_lowercase();
         let slates = options.slates;
         let backups = options
@@ -275,6 +412,14 @@ impl Player {
         };
 
         let mut primary = self.fetch_primary(id, &channel, &options, index, url).await?;
+        tracing::trace!(
+            %channel,
+            index,
+            segments = primary.segments.len(),
+            ads = primary.segments.iter().filter(|s| s.ad).count(),
+            pdts = ?primary.segments.iter().map(|s| (s.pdt.unwrap_or(0) / 1000 % 3600, s.ad)).collect::<Vec<_>>(),
+            "primary playlist"
+        );
         if options.simulate_ads {
             primary.simulate_ads(120, 30);
         }
@@ -288,7 +433,8 @@ impl Player {
         let mut sessions = self.sessions.lock().unwrap();
         let Some(s) = sessions.get_mut(id) else { return Ok(None) };
         let refs: Vec<Option<&MediaPlaylist>> = backups.iter().map(Option::as_ref).collect();
-        s.timeline.update(index, &primary, &refs);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+        s.timeline.update_at(index, &primary, &refs, Some(now));
         update_status(s, &primary);
         Ok(Some(s.timeline.render(index, &SLATES)))
     }
@@ -318,7 +464,13 @@ impl Player {
             return parse_media(&text, &url);
         }
         tracing::info!(%channel, %status, "media playlist rejected, resolving the channel again");
-        let master = match self.tw.master_playlist(channel, &options.player_type).await {
+        // A warm session avoids the new session's preroll here too.
+        let warm = if options.player_type == PRIMARY_PLAYER_TYPE { self.take_warm(channel) } else { None };
+        let resolved = match warm {
+            Some(m) => Ok(m),
+            None => self.tw.master_playlist(channel, &options.player_type).await,
+        };
+        let master = match resolved {
             Ok(m) => m,
             Err(e) => {
                 if e.downcast_ref::<Unavailable>().is_some() {
@@ -392,7 +544,7 @@ impl Player {
 }
 
 fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
-    let ad = primary.ad_window().map(|(from, until)| AdStatus {
+    let mut ad = primary.ad_window().map(|(from, until)| AdStatus {
         from,
         until,
         filled_by: if !s.options.slates {
@@ -405,8 +557,17 @@ fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
             FilledBy::Backup
         },
     });
-    if let Some(a) = &ad {
+    if let Some(a) = &mut ad {
         s.break_from = Some(s.break_from.map_or(a.from, |f| f.min(a.from)));
+        // Same break: keep its earliest start and latest known end. The block's first ad, which
+        // carries the block's length, scrolls out of the playlist while later ones still run.
+        if let Some(prev) = &s.status.ad {
+            a.from = a.from.min(prev.from);
+            a.until = match (a.until, prev.until) {
+                (Some(x), Some(y)) => Some(x.max(y)),
+                (x, y) => x.or(y),
+            };
+        }
     }
     let before = s.status.ad.as_ref().map(|a| a.filled_by);
     let after = ad.as_ref().map(|a| a.filled_by);

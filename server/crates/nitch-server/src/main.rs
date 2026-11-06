@@ -99,6 +99,16 @@ async fn server() -> Result<()> {
         }
     });
 
+    // Pre-warming (D35): sessions for the followed live channels, opened ahead of their preroll.
+    let warming = state.clone();
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            tick.tick().await;
+            warming.player.warm_tick().await;
+        }
+    });
+
     // Chat history: read the followed live channels in the background, so their chats open with
     // what was said before. Refreshed every minute; nothing while logged out.
     let pins = state.clone();
@@ -113,9 +123,14 @@ async fn server() -> Result<()> {
                 .await;
             match live {
                 Ok(Some(streams)) => {
-                    pins.chat.set_pinned(streams.iter().take(MAX_PINNED_CHATS).map(|s| s.user_login.to_lowercase()).collect())
+                    pins.chat.set_pinned(streams.iter().take(MAX_PINNED_CHATS).map(|s| s.user_login.to_lowercase()).collect());
+                    // The same channels are kept warm, so they start without a preroll (D35).
+                    pins.player.set_warm_channels(streams.iter().map(|s| s.user_login.clone()).collect());
                 }
-                Ok(None) => pins.chat.set_pinned(Default::default()),
+                Ok(None) => {
+                    pins.chat.set_pinned(Default::default());
+                    pins.player.set_warm_channels(Vec::new());
+                }
                 Err(e) => tracing::debug!("followed streams for chat history: {e:#}"),
             }
         }
