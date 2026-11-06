@@ -84,6 +84,28 @@ fn live_on_another_time_grid_ends_the_slates() {
 }
 
 #[test]
+fn a_lower_quality_substitute_is_set_apart_by_discontinuities() {
+    // Live, then 3 segments of ads covered by a 360p substitute, then live again.
+    let start = parse_pdt("2026-11-06T21:01:30.000Z").unwrap();
+    let mut primary = grid_playlist(start, 9, false, true, "primary.example");
+    for s in &mut primary.segments[3..6] {
+        s.ad = true;
+    }
+    let mut low = grid_playlist(start, 9, false, true, "low.example");
+    low.substitute = true;
+    let mut tl = Timeline::new();
+    tl.update(0, &primary, &[Some(&low)]);
+    let out = tl.render(0, &SLATES);
+    let body: Vec<&str> = out.lines().skip_while(|l| !l.starts_with("#EXT-X-MAP")).collect();
+    let uris: Vec<&str> = body.iter().copied().filter(|l| l.starts_with("https://")).collect();
+    assert_eq!(uris.iter().filter(|u| u.contains("low.example")).count(), 3, "{out}");
+    // One discontinuity into the substitute and one back, each with its own init segment.
+    assert_eq!(body.iter().filter(|l| **l == "#EXT-X-DISCONTINUITY").count(), 2, "{out}");
+    assert_eq!(body.iter().filter(|l| l.starts_with("#EXT-X-MAP")).count(), 3, "{out}");
+    assert!(!tl.last_substitute());
+}
+
+#[test]
 fn slates_of_an_fmp4_stream_are_fmp4_from_the_first() {
     // A preroll on an fMP4 stream: no live segment yet, but the ads show the container.
     let start = parse_pdt("2026-11-06T21:01:28.531Z").unwrap();

@@ -63,6 +63,7 @@ function AdBadge({ ad, hls }: { ad: PlayStatus["ad"]; hls: Hls | null }) {
   const playing = hls?.playingDate?.getTime();
   if (playing && (playing < ad.from || (ad.until && playing >= ad.until))) return null;
   if (ad.filled_by === "backup") return <div className="ad-badge">Ad skipped</div>;
+  if (ad.filled_by === "low_quality") return <div className="ad-badge">Ad skipped · lower quality</div>;
   const left = ad.until && playing ? Math.max(0, Math.round((ad.until - playing) / 1000)) : null;
   return (
     <div className="ad-badge ad-badge--slate">

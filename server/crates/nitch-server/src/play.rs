@@ -24,8 +24,10 @@ use url::Url;
 /// few seconds, multiview tiles likewise, so only abandoned sessions get this old.
 const IDLE: Duration = Duration::from_secs(45);
 /// Backup sources in priority order. `embed` got its ads at other times than `site` in S1; the
-/// others add independent sessions so that some source is ad-free as often as possible.
-pub const BACKUP_PLAYER_TYPES: &[&str] = &["embed", "popout", "autoplay", "frontpage"];
+/// others add independent sessions so that some source is ad-free as often as possible. Last,
+/// `autoplay` on the Android platform: only up to 360p, but it got no preroll in any test, so
+/// a new session shows the stream in low quality instead of a slate (D36).
+pub const BACKUP_PLAYER_TYPES: &[&str] = &["embed", "popout", "autoplay", "frontpage", "autoplay@android"];
 /// After Twitch reported the channel offline, wait this long before asking again.
 const OFFLINE_BACKOFF: Duration = Duration::from_secs(15);
 /// After a backup failed to resolve, wait this long before trying it again.
@@ -85,6 +87,8 @@ impl Default for PlayOptions {
 #[serde(rename_all = "snake_case")]
 pub enum FilledBy {
     Backup,
+    /// A backup fills it, but only in a lower quality (the ad-free 360p source).
+    LowQuality,
     Slate,
     /// No source is ad-free and slates are off: the stream pauses (multiview tiles).
     Nothing,
@@ -138,15 +142,31 @@ pub struct Player {
     warm_channels: Mutex<Vec<String>>,
 }
 
-/// The backup's rendition matching the primary's: same name, else same resolution.
-fn matching_variant(master: &Master, primary: &Master, index: usize) -> Option<Url> {
+fn height(resolution: Option<&str>) -> Option<u32> {
+    resolution?.split_once('x')?.1.parse().ok()
+}
+
+/// The backup's rendition for the primary's: same name, else same resolution, else (`true`: a
+/// substitute) the best one not taller than it, else its lowest. Sources like `autoplay` only
+/// offer up to 360p; in an ad, low quality beats a slate.
+fn matching_variant(master: &Master, primary: &Master, index: usize) -> Option<(Url, bool)> {
     let p = primary.variants.get(index)?;
-    master
+    if let Some(v) = master
         .variants
         .iter()
         .find(|v| v.name == p.name)
         .or_else(|| master.variants.iter().find(|v| v.resolution.is_some() && v.resolution == p.resolution))
-        .map(|v| v.uri.clone())
+    {
+        return Some((v.uri.clone(), false));
+    }
+    // Video renditions only (no audio-only stand-in for a picture).
+    let videos = || master.variants.iter().filter(|v| height(v.resolution.as_deref()).is_some());
+    let target = height(p.resolution.as_deref())?;
+    videos()
+        .filter(|v| height(v.resolution.as_deref()).is_some_and(|h| h <= target))
+        .max_by_key(|v| v.bandwidth)
+        .or_else(|| videos().min_by_key(|v| v.bandwidth))
+        .map(|v| (v.uri.clone(), true))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -301,7 +321,7 @@ impl Player {
     }
 
     /// Resolves the channel and returns the new play session's id.
-    pub async fn start(&self, channel: &str, options: PlayOptions) -> Result<String> {
+    pub async fn start(self: &std::sync::Arc<Self>, channel: &str, options: PlayOptions) -> Result<String> {
         let warm = if options.player_type == PRIMARY_PLAYER_TYPE { self.take_warm(channel) } else { None };
         let prewarmed = warm.is_some();
         let primary = match warm {
@@ -322,7 +342,7 @@ impl Player {
             id.clone(),
             PlaySession {
                 status: PlayStatus { channel: channel.clone(), ad: None },
-                channel,
+                channel: channel.clone(),
                 options,
                 primary,
                 backups,
@@ -332,7 +352,41 @@ impl Player {
                 last_access: Instant::now(),
             },
         );
+        drop(sessions);
+        // The backups' own prerolls run out in the first minute, so they're ad-free by the first
+        // ad. Opened only at that ad (as before), each started its own preroll right then.
+        let (me, sid, ch) = (self.clone(), id.clone(), channel);
+        tokio::spawn(async move { me.open_backups(&sid, &ch).await });
         Ok(id)
+    }
+
+    /// Resolves every backup source of a play session and fetches one of its playlists, which
+    /// starts its preroll (D35/D36).
+    async fn open_backups(&self, id: &str, channel: &str) {
+        let types: Vec<String> = {
+            let sessions = self.sessions.lock().unwrap();
+            let Some(s) = sessions.get(id) else { return };
+            s.backups.iter().map(|b| b.player_type.clone()).collect()
+        };
+        let opens = types.iter().enumerate().map(|(k, player_type)| async move {
+            let opened = async {
+                let master = self.tw.master_playlist(channel, player_type).await?;
+                let url = master.variants.iter().min_by_key(|v| v.bandwidth).map(|v| v.uri.clone()).context("no renditions")?;
+                self.tw.get_text(&url).await?;
+                anyhow::Ok(master)
+            };
+            match opened.await {
+                Ok(master) => {
+                    let mut sessions = self.sessions.lock().unwrap();
+                    if let Some(b) = sessions.get_mut(id).and_then(|s| s.backups.get_mut(k)) {
+                        b.master.get_or_insert(master);
+                    }
+                }
+                Err(e) => tracing::debug!(%channel, %player_type, "backup source not opened: {e:#}"),
+            }
+        });
+        futures::future::join_all(opens).await;
+        tracing::debug!(%channel, %id, "backup sources opened");
     }
 
     /// `None` if the session doesn't exist (anymore).
@@ -502,7 +556,7 @@ impl Player {
             let known = b.master.as_ref().map(|m| matching_variant(m, &s.primary, index));
             Some((known, b.failed.is_none_or(|t| t.elapsed() > BACKUP_RETRY), b.player_type.clone()))
         })?;
-        let url = match known {
+        let (url, substitute) = match known {
             Some(Some(u)) => u,
             Some(None) => return None,
             None if may_retry => match self.tw.master_playlist(channel, &player_type).await {
@@ -526,7 +580,10 @@ impl Player {
             None => return None,
         };
         match self.tw.get_text(&url).await {
-            Ok((status, text)) if status.is_success() => parse_media(&text, &url).ok(),
+            Ok((status, text)) if status.is_success() => parse_media(&text, &url).ok().map(|mut pl| {
+                pl.substitute = substitute;
+                pl
+            }),
             Ok((status, _)) => {
                 tracing::info!(%channel, %player_type, %status, "backup playlist rejected, will resolve it again");
                 self.with(id, |s| {
@@ -553,6 +610,8 @@ fn update_status(s: &mut PlaySession, primary: &MediaPlaylist) {
             if behind || s.options.backups.is_empty() { FilledBy::Nothing } else { FilledBy::Backup }
         } else if s.options.backups.is_empty() || s.timeline.recent_slate(3) {
             FilledBy::Slate
+        } else if s.timeline.last_substitute() {
+            FilledBy::LowQuality
         } else {
             FilledBy::Backup
         },

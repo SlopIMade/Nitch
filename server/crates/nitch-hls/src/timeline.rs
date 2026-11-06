@@ -49,6 +49,8 @@ struct Entry {
     start: i64,
     duration: f64,
     origin: Origin,
+    /// From a substitute rendition (lower quality, see [`MediaPlaylist::substitute`]).
+    substitute: bool,
     /// `EXT-X-DISCONTINUITY` before this entry.
     disc: bool,
 }
@@ -72,6 +74,7 @@ struct Candidate {
     origin: Origin,
     /// A real discontinuity in the live stream (e.g. a stream restart), not one around an ad.
     genuine_disc: bool,
+    substitute: bool,
 }
 
 pub struct Timeline {
@@ -143,7 +146,7 @@ impl Timeline {
             }
             let prev_live = i > 0 && !primary.segments[i - 1].ad;
             sources.insert(pdt, Source { uri: s.uri.clone(), map: s.map.clone() });
-            live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Primary, genuine_disc: s.discontinuity && prev_live });
+            live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Primary, genuine_disc: s.discontinuity && prev_live, substitute: false });
             if s.duration > 0.5 {
                 self.nominal = s.duration;
             }
@@ -157,7 +160,7 @@ impl Timeline {
                     continue;
                 }
                 sources.entry(pdt).or_insert(Source { uri: s.uri.clone(), map: s.map.clone() });
-                live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Backup(index), genuine_disc: false });
+                live.insert(pdt, Candidate { duration: s.duration, origin: Origin::Backup(index), genuine_disc: false, substitute: backup.substitute });
             }
         }
 
@@ -183,12 +186,12 @@ impl Timeline {
                 // The next live segment starts here (within half a segment, which absorbs
                 // rounding and drift like 1.985 s segments): take it.
                 Some((&pdt, c)) if pdt - end < ms(self.nominal) / 2 => {
-                    self.push(pdt, c.duration, c.origin, c.genuine_disc);
+                    self.push_live(pdt, c);
                     end = pdt + ms(c.duration);
                 }
                 // Without slates: skip the gap and continue with the next live segment.
                 Some((&pdt, c)) if !self.slates => {
-                    self.push(pdt, c.duration, c.origin, c.genuine_disc);
+                    self.push_live(pdt, c);
                     end = pdt + ms(c.duration);
                 }
                 // After a slate (or at the start), live content starts less than a slate from
@@ -196,7 +199,7 @@ impl Timeline {
                 // in between. Take it; the discontinuity after a slate covers the short gap.
                 // Waiting for a slate that can never fit froze the output until the preroll ended.
                 Some((&pdt, c)) if pdt - end < ms(self.nominal) && self.last_origin().is_none_or(|o| o == Origin::Slate) => {
-                    self.push(pdt, c.duration, c.origin, c.genuine_disc);
+                    self.push_live(pdt, c);
                     end = pdt + ms(c.duration);
                 }
                 None if !self.slates => break,
@@ -208,19 +211,26 @@ impl Timeline {
                     if slot_end > limit {
                         break;
                     }
-                    self.push(end, self.nominal, Origin::Slate, false);
+                    self.push(end, self.nominal, Origin::Slate, false, false);
                     end = slot_end;
                 }
             }
         }
     }
 
-    fn push(&mut self, start: i64, duration: f64, origin: Origin, genuine_disc: bool) {
-        let prev_slate = self.entries.back().is_some_and(|e| e.origin == Origin::Slate);
+    fn push_live(&mut self, start: i64, c: &Candidate) {
+        self.push(start, c.duration, c.origin, c.genuine_disc, c.substitute);
+    }
+
+    fn push(&mut self, start: i64, duration: f64, origin: Origin, genuine_disc: bool, substitute: bool) {
+        let prev = self.entries.back();
+        let prev_slate = prev.is_some_and(|e| e.origin == Origin::Slate);
+        // A switch to or from a substitute rendition changes resolution and init segment.
+        let rendition_change = prev.is_some_and(|e| e.origin != Origin::Slate && e.substitute != substitute);
         // Each slate segment restarts its timestamps, so it needs a discontinuity, and so does
         // the first live segment after one. Primary and backup are the same transcode: no need.
-        let disc = !self.entries.is_empty() && (origin == Origin::Slate || prev_slate || genuine_disc);
-        self.entries.push_back(Entry { seq: self.next_seq, start, duration, origin, disc });
+        let disc = !self.entries.is_empty() && (origin == Origin::Slate || prev_slate || genuine_disc || rendition_change);
+        self.entries.push_back(Entry { seq: self.next_seq, start, duration, origin, substitute, disc });
         self.next_seq += 1;
     }
 
@@ -245,6 +255,11 @@ impl Timeline {
     /// Origin of the newest entry.
     pub fn last_origin(&self) -> Option<Origin> {
         self.entries.back().map(|e| e.origin)
+    }
+
+    /// True if the newest entry comes from a substitute rendition (lower quality).
+    pub fn last_substitute(&self) -> bool {
+        self.entries.back().is_some_and(|e| e.substitute)
     }
 
     /// True if any of the newest `n` entries is a slate.

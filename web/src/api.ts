@@ -51,7 +51,7 @@ export type MultiviewInfo = { hls_url: string; grid: number; slots: (SlotInfo | 
 export type PlayStatus = {
   channel: string;
   /** Set while an ad break is in the playlist; `from`/`until` are stream time (Unix ms). */
-  ad: { from: number; until: number | null; filled_by: "backup" | "slate" | "nothing" } | null;
+  ad: { from: number; until: number | null; filled_by: "backup" | "low_quality" | "slate" | "nothing" } | null;
 };
 
 /** Testing ad handling: `localStorage["nitch.debug.play"] = '{"simulate_ads":true,"backup":false}'`. */

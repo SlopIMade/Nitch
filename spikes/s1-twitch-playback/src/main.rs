@@ -211,11 +211,13 @@ async fn probe_one(tw: &twitch::Twitch, channel: &str, player_type: &str) -> Res
     let v = master.variants.iter().min_by_key(|v| v.bandwidth).unwrap();
     let (_, text) = tw.get_text(&v.uri).await?;
     let pl = hls::parse_media(&text)?;
+    let best = master.variants.iter().max_by_key(|v| v.bandwidth).map(|v| v.name.clone()).unwrap_or_default();
     Ok(format!(
-        "ad segments {:>2}/{:<2} ad dateranges {}  token: {}",
+        "ad segments {:>2}/{:<2} ad dateranges {}  renditions {} (best {best})  token: {}",
         pl.ad_segment_count(),
         pl.segments.len(),
         pl.ad_dateranges().count(),
+        master.variants.len(),
         token.flags()
     ))
 }

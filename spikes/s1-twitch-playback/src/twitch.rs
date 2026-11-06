@@ -16,9 +16,9 @@ const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
                           (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
 
 /// The query the web player sends as `PlaybackAccessToken_Template`.
-const TOKEN_QUERY: &str = r#"query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {
-  streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature __typename }
-  videoPlaybackAccessToken(id: $vodID, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) { value signature __typename }
+const TOKEN_QUERY: &str = r#"query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!, $platform: String!) {
+  streamPlaybackAccessToken(channelName: $login, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) { value signature __typename }
+  videoPlaybackAccessToken(id: $vodID, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) { value signature __typename }
 }"#;
 
 pub struct Twitch {
@@ -29,6 +29,8 @@ pub struct Twitch {
 pub struct Token {
     pub value: String,
     pub signature: String,
+    /// `web` unless the player type was given as `type@platform` (e.g. `autoplay@android`).
+    pub platform: String,
 }
 
 impl Token {
@@ -60,12 +62,13 @@ impl Twitch {
     }
 
     pub async fn playback_token(&self, login: &str, player_type: &str) -> Result<Token> {
+        let (player_type, platform) = player_type.split_once('@').unwrap_or((player_type, "web"));
         let body = json!({
             "operationName": "PlaybackAccessToken_Template",
             "query": TOKEN_QUERY,
             "variables": {
                 "isLive": true, "login": login.to_lowercase(), "isVod": false, "vodID": "",
-                "playerType": player_type,
+                "playerType": player_type, "platform": platform,
             },
         });
         let resp: Value = self
@@ -89,6 +92,7 @@ impl Twitch {
         Ok(Token {
             value: t["value"].as_str().context("token value missing")?.to_owned(),
             signature: t["signature"].as_str().context("token signature missing")?.to_owned(),
+            platform: platform.to_owned(),
         })
     }
 
@@ -102,7 +106,7 @@ impl Twitch {
             .append_pair("allow_audio_only", "true")
             .append_pair("fast_bread", "true")
             .append_pair("p", &(nanos() % 10_000_000).to_string())
-            .append_pair("platform", "web")
+            .append_pair("platform", &token.platform)
             .append_pair("player_backend", "mediaplayer")
             .append_pair("playlist_include_framerate", "true")
             .append_pair("reassignments_supported", "true")

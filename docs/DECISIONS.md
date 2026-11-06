@@ -396,7 +396,7 @@ playback token lasts 20 minutes.
   minutes and a session is handed out until it's 15 minutes old. Starting such a channel (single
   view, multiview tile, or re-resolving an expired session) takes a ready one: no preroll. Cost:
   about four requests per channel every ten minutes. Channels you don't follow still get the
-  preroll, filled by the slate.
+  preroll (since D36 filled by a 360p stream instead of the slate).
 - **Slates by the clock:** a preroll's ad segments kept the same timestamps for half a minute, and
   slates only advanced with them, so the output stood still (the countdown froze) and then jumped
   ahead 30 s. While the primary is in an ad, slates now advance with the wall clock (up to 6 s
@@ -406,4 +406,26 @@ playback token lasts 20 minutes.
   ad's end, which made it jump back with every newly announced ad. A preroll can still be two
   blocks that Twitch announces one after the other; then the countdown starts once more.
 - The badge is a status line (a dot and text), not something that looks like a button.
+
+### D36 — A 360p source without prerolls, and backups opened at the start
+*2026-11-06*
+
+Prompted by the TwitchAdSolutions `vaft` script, which falls back to a low-quality stream during
+ads. Measured (spike S1, `probe` with a platform per player type): every `web` and `ios` player
+type, and `site`/`embed`/`popout` on `android`, got a preroll on all tested channels (bonjwa,
+KaiCenat, h0llylp); `autoplay` and `picture-by-picture` on the **Android platform** never did.
+They only offer up to 360p, in the same container (TS/fMP4) as the channel's main stream.
+
+- **`autoplay@android` is the last backup**, before the slate. A backup without the primary's
+  rendition stands in with its best one up to that height (a substitute): the player gets the
+  stream in 360p instead of a slate, set apart by discontinuities (resolution and init segment
+  change), and the badge says "Ad skipped · lower quality". Tested in the browser on a cold fMP4
+  channel: 360p from the first second, back to 1080p after the 60 s preroll, no stall or error;
+  in a multiview both tiles' prerolls were filled the same way, without pipeline errors.
+- **Backups are opened when the play session starts**, each with one playlist fetch, instead of
+  at the first ad. Opened at the ad, every backup started its own preroll right then and was no
+  help for that ad; opened early, their prerolls are over long before the first midroll.
+- The token request and the usher URL name the platform (`type@platform`, default `web`).
+
+Warm sessions (D35) stay: they give followed channels full quality from the start.
 

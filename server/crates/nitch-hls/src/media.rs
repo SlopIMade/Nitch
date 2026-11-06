@@ -72,6 +72,9 @@ pub struct MediaPlaylist {
     pub target_duration: u64,
     pub segments: Vec<Segment>,
     pub dateranges: Vec<DateRange>,
+    /// A backup's playlist of another rendition (lower quality) standing in for this one, e.g.
+    /// the ad-free 360p source during a preroll (D36). Set by the caller.
+    pub substitute: bool,
 }
 
 impl MediaPlaylist {
@@ -187,7 +190,7 @@ pub fn parse_media(text: &str, base: &Url) -> Result<MediaPlaylist> {
         }
     }
 
-    let mut pl = MediaPlaylist { target_duration, segments, dateranges };
+    let mut pl = MediaPlaylist { target_duration, segments, dateranges, substitute: false };
     let ranges = pl.ad_ranges();
     for s in &mut pl.segments {
         if let Some(p) = s.pdt {
