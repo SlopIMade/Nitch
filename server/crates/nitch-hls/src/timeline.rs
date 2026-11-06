@@ -83,6 +83,10 @@ pub struct Timeline {
     nominal: f64,
     /// Per rendition: segment time → URI.
     sources: HashMap<usize, BTreeMap<i64, Source>>,
+    /// Renditions known to be fMP4 (from any primary segment, ads included): their slates must be
+    /// fMP4 from the very first one. Deciding by live segments only, a preroll's slates went out
+    /// as TS until the stream began, and the switch broke the player (bufferAppendError).
+    fmp4: std::collections::HashSet<usize>,
     /// Fill unfillable ad time with slates (browser player, D15). Without slates the playlist
     /// pauses and continues with the next live segment (multiview tiles: fallbacksrc retimes
     /// a stalled input, and slate timestamps confused the tile's timeline).
@@ -105,7 +109,15 @@ impl Timeline {
     }
 
     pub fn with_slates(slates: bool) -> Self {
-        Self { entries: VecDeque::new(), next_seq: 0, pruned_disc: 0, nominal: 2.0, sources: HashMap::new(), slates }
+        Self {
+            entries: VecDeque::new(),
+            next_seq: 0,
+            pruned_disc: 0,
+            nominal: 2.0,
+            sources: HashMap::new(),
+            fmp4: Default::default(),
+            slates,
+        }
     }
 
     /// Takes a fresh primary playlist of `rendition` (and, during ads, the backups' in priority
@@ -118,6 +130,9 @@ impl Timeline {
     /// time even when the ad segments' timestamps don't (a preroll's stood still for half a
     /// minute, so the output stalled and later jumped ahead).
     pub fn update_at(&mut self, rendition: usize, primary: &MediaPlaylist, backups: &[Option<&MediaPlaylist>], now: Option<i64>) {
+        if primary.segments.iter().any(|s| s.map.is_some()) {
+            self.fmp4.insert(rendition);
+        }
         let sources = self.sources.entry(rendition).or_default();
         let mut live: BTreeMap<i64, Candidate> = BTreeMap::new();
 
@@ -173,6 +188,14 @@ impl Timeline {
                 }
                 // Without slates: skip the gap and continue with the next live segment.
                 Some((&pdt, c)) if !self.slates => {
+                    self.push(pdt, c.duration, c.origin, c.genuine_disc);
+                    end = pdt + ms(c.duration);
+                }
+                // After a slate (or at the start), live content starts less than a slate from
+                // here: ads run on their own time grid, live segments on another, so no slate fits
+                // in between. Take it; the discontinuity after a slate covers the short gap.
+                // Waiting for a slate that can never fit froze the output until the preroll ended.
+                Some((&pdt, c)) if pdt - end < ms(self.nominal) && self.last_origin().is_none_or(|o| o == Origin::Slate) => {
                     self.push(pdt, c.duration, c.origin, c.genuine_disc);
                     end = pdt + ms(c.duration);
                 }
@@ -242,7 +265,7 @@ impl Timeline {
     pub fn render(&self, rendition: usize, slates: &Slates) -> String {
         let empty = BTreeMap::new();
         let sources = self.sources.get(&rendition).unwrap_or(&empty);
-        let fmp4 = sources.values().any(|s| s.map.is_some());
+        let fmp4 = self.fmp4.contains(&rendition) || sources.values().any(|s| s.map.is_some());
         let from = self.entries.len().saturating_sub(WINDOW);
         let disc_seq = self.pruned_disc + self.entries.iter().take(from).filter(|e| e.disc).count() as u64;
 

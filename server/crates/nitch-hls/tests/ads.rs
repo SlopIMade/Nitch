@@ -54,6 +54,47 @@ fn detects_ad_segments_by_title_and_daterange() {
     assert_eq!(pl.ad_break_until(), Some(start + 60_000));
 }
 
+/// A playlist of `count` 2 s segments from `start`, all ads or all live, optionally fMP4.
+fn grid_playlist(start: i64, count: i64, ad: bool, fmp4: bool, host: &str) -> MediaPlaylist {
+    let mut text = "#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:0\n".to_string();
+    if fmp4 {
+        text += &format!("#EXT-X-MAP:URI=\"https://{host}/init.mp4\"\n");
+    }
+    let title = if ad { "Amazon|1" } else { "live" };
+    for i in 0..count {
+        let t = start + i * 2000;
+        text += &format!("#EXT-X-PROGRAM-DATE-TIME:{}\n#EXTINF:2.000,{title}\nhttps://{host}/{t}.m4s\n", format_pdt(t));
+    }
+    parse(&text)
+}
+
+#[test]
+fn live_on_another_time_grid_ends_the_slates() {
+    // The primary is in its preroll on the ads' time grid; an ad-free backup has the live stream
+    // on a grid 1.7 s off. No slate fits before its next segment; it must be taken, not waited for.
+    let start = parse_pdt("2026-11-06T21:01:28.531Z").unwrap();
+    let primary = grid_playlist(start, 15, true, false, "primary.example");
+    let backup = grid_playlist(start + 1700, 14, false, false, "backup.example");
+    let mut tl = Timeline::new();
+    tl.update_at(0, &primary, &[Some(&backup)], Some(start + 32_000));
+    let out = tl.render(0, &SLATES);
+    let live = out.lines().filter(|l| l.ends_with(",live")).count();
+    assert!(live >= 13, "the backup's live segments fill the break:\n{out}");
+    assert_eq!(tl.last_origin(), Some(Origin::Backup(0)));
+}
+
+#[test]
+fn slates_of_an_fmp4_stream_are_fmp4_from_the_first() {
+    // A preroll on an fMP4 stream: no live segment yet, but the ads show the container.
+    let start = parse_pdt("2026-11-06T21:01:28.531Z").unwrap();
+    let primary = grid_playlist(start, 10, true, true, "primary.example");
+    let mut tl = Timeline::new();
+    tl.update_at(0, &primary, &[], Some(start + 30_000));
+    let out = tl.render(0, &SLATES);
+    assert!(out.contains("/hls/slate.m4s") && out.contains("/hls/slate-init.mp4"), "{out}");
+    assert!(!out.contains("/hls/slate.ts"), "{out}");
+}
+
 #[test]
 fn slates_keep_pace_with_the_wall_clock_during_an_ad() {
     // A preroll whose ad segments' timestamps stand still (seen live: half a minute): three ad
